@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "TheSprayer": {
+      "commandName": "Project",
+      "commandLineArgs": "-d windomain.local -s 192.168.38.102 -u vagrant -p vagrant -i Passwords.txt"
+    }
+  }
+}
