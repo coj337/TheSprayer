@@ -34,7 +34,7 @@ jobs:
         run: |
           release_name="TheSprayer-${{ matrix.target }}"
           # Build everything
-          dotnet publish TheSprayer/TheSprayer.csproj --runtime "${{ matrix.target }}" -c Release -p:PublishSingleFile=true --self-contained true -o "Release-${{ matrix.target }}" 
+          dotnet publish TheSprayer/TheSprayer.csproj --runtime "${{ matrix.target }}" -c Release -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true --self-contained true -o "Release-${{ matrix.target }}" 
       - name: Publish
         uses: softprops/action-gh-release@v0.1.5
         with:
