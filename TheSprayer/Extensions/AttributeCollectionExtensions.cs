@@ -26,7 +26,7 @@ namespace TheSprayer.Extensions
                         var fileTime = Convert.ToInt64(timeString);
                         if (!fileTime.Equals(long.MaxValue))
                         {
-                            parsedDate = DateTime.FromFileTimeUtc(fileTime);
+                            parsedDate = DateTime.FromFileTime(fileTime);
                         }
                     }
                     else

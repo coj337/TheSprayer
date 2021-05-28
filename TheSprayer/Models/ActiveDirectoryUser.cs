@@ -17,6 +17,7 @@ namespace TheSprayer.Models
         public string Company { get; set; }
         public string PasswordPolicyName { get; set; }
         public DateTime? PasswordLastSet { get; set; }
+        public DateTime? LastBadPasswordTime { get; set; }
         public DateTime? LastLogin { get; set; }
         public DateTime? AccountExpiry { get; set; }
         public DateTime? DateCreated { get; set; }

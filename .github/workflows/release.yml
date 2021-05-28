@@ -1,0 +1,43 @@
+name: "Create Releases"
+
+on:
+  release:
+    types: [published]
+    
+jobs:
+  release:
+    name: Release
+    strategy:
+      matrix:
+        kind: ['linux', 'windows']
+        include:
+          - kind: linux
+            os: ubuntu-latest
+            target: linux-x64
+            ext: ''
+          - kind: windows
+            os: windows-latest
+            target: win-x64
+            ext: '.exe'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 5.0.300
+
+      - name: Build
+        shell: bash
+        run: |
+          release_name="TheSprayer-${{ matrix.target }}"
+          # Build everything
+          dotnet publish TheSprayer/TheSprayer.csproj --runtime "${{ matrix.target }}" -c Release -p:PublishSingleFile=true --self-contained true -o "Release-${{ matrix.target }}" 
+      - name: Publish
+        uses: softprops/action-gh-release@v0.1.5
+        with:
+          files: "Release-${{ matrix.target }}/*${{ matrix.ext }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
