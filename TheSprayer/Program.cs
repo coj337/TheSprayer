@@ -11,7 +11,7 @@ namespace TheSprayer
             {
                 var adService = new ActiveDirectoryService(o.Domain, o.Username, o.Password, o.DomainController);
                 var passwords = File.ReadAllLines(o.PasswordListFile);
-
+                
                 adService.SprayPasswords(passwords);
             });
         }

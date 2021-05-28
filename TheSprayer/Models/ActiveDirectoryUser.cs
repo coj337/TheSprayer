@@ -23,6 +23,7 @@ namespace TheSprayer.Models
         public DateTime? DateCreated { get; set; }
         public int BadPasswordAttempts { get; set; }
         public int LogonCount { get; set; }
+        public bool Disabled { get; set; }
         public DateTime LastSync { get; private set; }
 
         public ActiveDirectoryUser()

