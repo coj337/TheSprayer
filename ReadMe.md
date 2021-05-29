@@ -1,4 +1,7 @@
-﻿# TheSprayer
+﻿![GitHub Actions CI](https://github.com/coj337/TheSprayer/workflows/CI/badge.svg)
+![GitHub all releases](https://img.shields.io/github/downloads/coj337/TheSprayer/total)
+
+# TheSprayer
 TheSprayer is a cross-platform tool designed to help penetration testers spray passwords against an Active Directory domain WITHOUT locking out accounts.  
 
 ## Quick Start
