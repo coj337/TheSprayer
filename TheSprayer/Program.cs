@@ -54,7 +54,7 @@ namespace TheSprayer
                     remainingAttempts = 2;
                 }
 
-                adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile);
+                adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Force);
             });
         }
     }

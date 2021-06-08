@@ -27,5 +27,8 @@ namespace TheSprayer
 
         [Option('a', "AttemptsRemaining", Required = false, HelpText = "Amount of attempts to leave per-account before lockout (Default: 2)")]
         public int AttemptsRemaining { get; set; }
+
+        [Option('f', "Force", Required = false, HelpText = "Force authentication attempts, even users close to lockout")]
+        public bool Force { get; set; }
     }
 }

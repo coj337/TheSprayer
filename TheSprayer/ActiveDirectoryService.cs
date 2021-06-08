@@ -227,12 +227,13 @@ namespace TheSprayer
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
-        public void SprayPasswords(IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, string outputFile = null)
+        public void SprayPasswords(IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, string outputFile = null, bool force = false)
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
             var users = GetAllDomainUsers();
 
+            //Filter users down to the list passed in (if any)
             if (usersToSpray != null)
             {
                 users = users.Where(u => usersToSpray.Contains(u.SamAccountName)).ToList();
@@ -243,13 +244,22 @@ namespace TheSprayer
                 }
             }
 
-            Console.WriteLine("Filtering disabled and nearly locked users...");
+            //Filter down the list of users
             List<ActiveDirectoryUser> filteredUsers = new();
-            foreach (var user in users)
+            if (force)
             {
-                if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                ColorConsole.WriteLine($"WARNING: All {users.Count} users will be sprayed. This could lock accounts.", ConsoleColor.Yellow);
+                filteredUsers = users.ToList();
+            }
+            else
+            {
+                Console.WriteLine("Filtering disabled and nearly locked users...");
+                foreach (var user in users)
                 {
-                    filteredUsers.Add(user);
+                    if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                    {
+                        filteredUsers.Add(user);
+                    }
                 }
             }
 

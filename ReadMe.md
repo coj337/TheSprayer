@@ -8,21 +8,33 @@ TheSprayer is a cross-platform tool designed to help penetration testers spray p
 To run it, you will need to update the parameters.
 The tool requires a domain name, DC IP/Hostname and a Username+Password combo for the domain in order to enumerate users and password policies.
 
-You can grab a release and run it directly:
+Spray all users with a password list:
 ```
-TheSprayer.exe -d windomain.local -s 192.168.38.102 -u Administrator -p Password1 -i Passwords.txt
+TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -p Passwords.txt
 ```
+
+Spray against a list of users:
+```
+TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -u Users.txt
+```
+
+Spray a single user+password without any files:
+```
+TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -u DomainAdmin -p DefinitelyValidPassword
+``` 
 
 ## Options
 ```
--d, --Domain          Required. The Active Directory domain (e.g. windomain.local)
--s, --Server          Required. The IP or hostname of a domain controller
--u, --Username        Required. Username for domain user to enumerate policies
--p, --Password        Required. Password for domain user to enumerate policies
--i, --PasswordFile    Required. A file containing a line delimited list of passwords to try
--o, --OutFile         File to output found credentials
---help                Display help screen
---version             Display version information
+-d, --Domain               Required. The Active Directory domain (e.g. windomain.local)
+-s, --Server               Required. The IP or hostname of a domain controller
+-U, --Username             Required. Username for domain user to enumerate policies
+-P, --Password             Required. Password for domain user to enumerate policies
+-p, --PasswordList         Required. A file containing a line delimited list of passwords or a single password to try
+-u, --UserList             A file containing a line delimited list of usernames or a single user to try
+-o, --OutFile              File to output found credentials
+-a, --AttemptsRemaining    Amount of attempts to leave per-account before lockout (Default: 2)
+-f, --Force                Force authentication attempts, even users close to lockout
+--help                     Display this help screen.
 ```
 
 ## Releases
