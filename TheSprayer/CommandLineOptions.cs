@@ -4,16 +4,16 @@ namespace TheSprayer
 {
     public class CommandLineOptions
     {
-        [Option('d', "Domain", Required = true, HelpText = "The Active Directory domain (e.g. windomain.local)")]
+        [Option('d', "Domain", Required = false, HelpText = "The Active Directory domain (e.g. windomain.local)")]
         public string Domain { get; set; }
 
-        [Option('s', "Server", Required = true, HelpText = "The IP or hostname of a domain controller")]
+        [Option('s', "Server", Required = false, HelpText = "The IP or hostname of a domain controller")]
         public string DomainController { get; set; }
 
-        [Option('U', "Username", Required = true, HelpText = "Username for domain user to enumerate policies")]
+        [Option('U', "Username", Required = false, HelpText = "Username for domain user to enumerate policies")]
         public string Username { get; set; }
 
-        [Option('P', "Password", Required = true, HelpText = "Password for domain user to enumerate policies")]
+        [Option('P', "Password", Required = false, HelpText = "Password for domain user to enumerate policies")]
         public string Password { get; set; }
 
         [Option('u', "UserList", Required = false, HelpText = "A file containing a line delimited list of usernames or a single user to try")]

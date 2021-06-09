@@ -6,22 +6,43 @@ TheSprayer is a cross-platform tool designed to help penetration testers spray p
 
 ## Quick Start
 To run it, you will need to update the parameters.
-The tool requires a domain name, DC IP/Hostname and a Username+Password combo for the domain in order to enumerate users and password policies.
+I've covered off a bunch of common use cases below, you can mix and match too! 🔥
 
-Spray all users with a password list:
+##### Spray all users with a password list:
+```
+TheSprayer.exe -p Passwords.txt
+```
+
+##### Spray against a list of users:
+```
+TheSprayer.exe -u Users.txt
+```
+
+##### Spray a single user and password:
+```
+TheSprayer.exe -u DomainAdmin -p DefinitelyValidPassword
+``` 
+
+##### Spray as another user
+```
+TheSprayer.exe -U Administrator -P Password1 -p Passwords.txt
+```
+
+##### Spray from a non-domain machine
+```
+TheSprayer.exe -d windomain.local -s 192.168.38.102 -p Passwords.txt
+```
+
+##### Spray from a non-domain machine with another user
 ```
 TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -p Passwords.txt
 ```
 
-Spray against a list of users:
+##### Force spray a password list against all users
 ```
-TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -u Users.txt
+TheSprayer.exe -p Passwords.txt -f
 ```
-
-Spray a single user+password without any files:
-```
-TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password1 -u DomainAdmin -p DefinitelyValidPassword
-``` 
+*Note: This will spray even if it's detected as unsafe, use at your own risk!*
 
 ## Options
 ```
