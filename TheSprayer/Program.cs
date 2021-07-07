@@ -11,7 +11,7 @@ namespace TheSprayer
         public static void Main(string[] args)
         {
             Parser.Default.ParseArguments<CommandLineOptions>(args).WithParsed(o =>
-            {                
+            {
                 IEnumerable<string> passwords, users;
                 int remainingAttempts;
 

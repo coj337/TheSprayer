@@ -228,7 +228,7 @@ namespace TheSprayer
             //Filter users down to the list passed in (if any)
             if (usersToSpray != null)
             {
-                users = users.Where(u => usersToSpray.Contains(u.SamAccountName)).ToList();
+                users = users.Where(u => usersToSpray.Any(u2 => u2.ToLower() == u.SamAccountName.ToLower())).ToList();
                 if (!users.Any())
                 {
                     Console.WriteLine("No users, exiting!");
@@ -360,8 +360,6 @@ namespace TheSprayer
             {
                 return false;
             }
-
-            
         }
 
         private LdapConnection CreateLdapConnection()
