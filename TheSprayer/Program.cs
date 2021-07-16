@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using TheSprayer.Helpers;
+using TheSprayer.Services;
 
 namespace TheSprayer
 {
@@ -86,7 +87,7 @@ namespace TheSprayer
                 }
 
                 var adService = new ActiveDirectoryService(o.Domain, o.Username, o.Password, o.DomainController);
-                adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Force);
+                adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Continuous, o.NoDb, o.Force);
             });
         }
     }
