@@ -50,10 +50,12 @@ TheSprayer.exe -p Passwords.txt -f
 -s, --Server               Required. The IP or hostname of a domain controller
 -U, --Username             Required. Username for domain user to enumerate policies
 -P, --Password             Required. Password for domain user to enumerate policies
--p, --PasswordList         Required. A file containing a line delimited list of passwords or a single password to try
 -u, --UserList             A file containing a line delimited list of usernames or a single user to try
+-p, --PasswordList         Required. A file containing a line delimited list of passwords or a single password to try
 -o, --OutFile              File to output found credentials
 -a, --AttemptsRemaining    Amount of attempts to leave per-account before lockout (Default: 2)
+-c, --Continuous           Continuously spray credentials, waiting between attempts to prevent lockout.
+-n, --NoDb                 Disable using a DB to store previously sprayed creds.
 -f, --Force                Force authentication attempts, even users close to lockout
 --help                     Display this help screen.
 ```

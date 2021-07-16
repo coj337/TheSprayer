@@ -28,6 +28,12 @@ namespace TheSprayer
         [Option('a', "AttemptsRemaining", Required = false, HelpText = "Amount of attempts to leave per-account before lockout (Default: 2)")]
         public int AttemptsRemaining { get; set; }
 
+        [Option('c', "Continuous", Required = false, HelpText = "Continuously spray credentials, waiting between attempts to prevent lockout.")]
+        public bool Continuous { get; set; }
+
+        [Option('n', "NoDb", Required = false, HelpText = "Disable using a DB to store previously sprayed creds.")]
+        public bool NoDb { get; set; }
+
         [Option('f', "Force", Required = false, HelpText = "Force authentication attempts, even users close to lockout")]
         public bool Force { get; set; }
     }

