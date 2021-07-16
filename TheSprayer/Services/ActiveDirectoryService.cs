@@ -18,6 +18,7 @@ namespace TheSprayer.Services
         private readonly string _domainUserPass;
         private readonly string _domainController;
         private readonly string _distinguishedName;
+        private readonly string _dbLock = "";
 
         public ActiveDirectoryService(string domain, string domainUser, string domainUserPass, string domainController)
         {
@@ -262,7 +263,7 @@ namespace TheSprayer.Services
             }
 
             //Get the previous attempts for these users, we don't want to double-spray passwords
-            Dictionary<string, List<CredentialAttempt>> previousSprays = new Dictionary<string, List<CredentialAttempt>>();
+            Dictionary<string, List<CredentialAttempt>> previousSprays = new();
             if (!noDb)
             {
                 previousSprays = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
@@ -284,8 +285,13 @@ namespace TheSprayer.Services
                     user =>
                     {
                         //Skip user if they've previously been sprayed according to the db
-                        if (previousSprays.ContainsKey(user.SamAccountName) && previousSprays[user.SamAccountName].Any(a => a.Password == password))
+                        if (previousSprays.ContainsKey(user.SamAccountName))
                         {
+                            var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
+                            if (previousAttempt != null && previousAttempt.Success) 
+                            {
+                                ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
+                            }
                             return;
                         }
 
@@ -305,11 +311,22 @@ namespace TheSprayer.Services
 
                             if (!noDb)
                             {
-                                _sqlService.SaveCredentialPair(user.SamAccountName, password);
+                                lock (_dbLock)
+                                {
+                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, true);
+                                }
                             }
                         }
                         else //Increment users bad password attempts and remove if close to lockout
                         {
+                            if (!noDb)
+                            {
+                                lock (_dbLock)
+                                {
+                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, false);
+                                }
+                            }
+
                             user.BadPasswordAttempts++;
                             user.LastBadPasswordTime = DateTime.Now;
                             if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))

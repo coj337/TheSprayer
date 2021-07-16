@@ -2,15 +2,17 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TheSprayer.Db;
 
 namespace TheSprayer.Db
 {
     [DbContext(typeof(SprayDbContext))]
-    partial class SprayDbContextModelSnapshot : ModelSnapshot
+    [Migration("20210716061202_AddSuccess")]
+    partial class AddSuccess
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -16,16 +16,19 @@ namespace TheSprayer.Services
 
         public SqliteService()
         {
+            _db = new SprayDbContext();
+
             //Apply all migrations
             _db.Database.Migrate();
         }
 
-        public void SaveCredentialPair(string username, string password)
+        public void SaveCredentialPair(string username, string password, bool isSuccess)
         {
             _db.Attempts.Add(new CredentialAttempt()
             {
                 Username = username,
                 Password = password,
+                Success = isSuccess,
                 LastSprayTime = DateTime.Now
             });
             _db.SaveChanges();
@@ -48,7 +51,11 @@ namespace TheSprayer.Services
 
         public Dictionary<string, List<CredentialAttempt>> GetSprayAttemptsForUsers(IEnumerable<string> usernames)
         {
-            return _db.Attempts.Where(a => usernames.Contains(a.Username)).GroupBy(a => a.Username).ToDictionary(u => u.Key, u => u.ToList());
+            return _db.Attempts
+                .Where(a => usernames.Contains(a.Username))
+                .AsEnumerable()
+                .GroupBy(a => a.Username)
+                .ToDictionary(u => u.Key, u => u.ToList());
         }
 
         public IEnumerable<CredentialAttempt> GetSprayAttemptsForPassword(string password)
