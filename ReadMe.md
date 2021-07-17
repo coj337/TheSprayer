@@ -28,7 +28,7 @@ TheSprayer.exe -u DomainAdmin -p DefinitelyValidPassword
 TheSprayer.exe -U Administrator -P Password1 -p Passwords.txt
 ```
 
-##### Spray from a non-domain machine
+##### Spray from a non-domain machine (e.g. with runas /netonly)
 ```
 TheSprayer.exe -d windomain.local -s 192.168.38.102 -p Passwords.txt
 ```
@@ -43,6 +43,21 @@ TheSprayer.exe -d windomain.local -s 192.168.38.102 -U Administrator -P Password
 TheSprayer.exe -p Passwords.txt -f
 ```
 *Note: This will spray even if it's detected as unsafe, use at your own risk!*
+
+##### Print all password policies to the terminal
+```
+TheSprayer.exe --Policy
+```
+
+##### Write a list of users to users.txt
+```
+TheSprayer.exe --Users users
+```
+
+##### Write a list of users and all their details from AD to users.csv
+```
+TheSprayer.exe --UsersCsv users
+```
 
 ## Options
 ```
