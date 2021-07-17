@@ -34,6 +34,15 @@ namespace TheSprayer
         [Option('n', "NoDb", Required = false, HelpText = "Disable using a DB to store previously sprayed creds.")]
         public bool NoDb { get; set; }
 
+        [Option("Users", Required = false, HelpText = "Outputs a list of all users")]
+        public string OutputUsers { get; set; }
+
+        [Option("UsersCsv", Required = false, HelpText = "Outputs a list of all users along with their domain info to a CSV file")]
+        public string OutputUsersCsv { get; set; }
+
+        [Option("PassPol", Required = false, HelpText = "Outputs the password polic(ies) to the terminal")]
+        public bool OutputPasswordPolicy { get; set; }
+
         [Option('f', "Force", Required = false, HelpText = "Force authentication attempts, even users close to lockout")]
         public bool Force { get; set; }
     }

@@ -1,7 +1,9 @@
 ﻿using CommandLine;
+using ServiceStack;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using TheSprayer.Helpers;
 using TheSprayer.Services;
 
@@ -13,47 +15,6 @@ namespace TheSprayer
         {
             Parser.Default.ParseArguments<CommandLineOptions>(args).WithParsed(o =>
             {
-                IEnumerable<string> passwords, users;
-                int remainingAttempts;
-
-                //Get password list from file or assume it's a single password if it doesn't exist
-                if (File.Exists(o.PasswordList))
-                {
-                    passwords = File.ReadAllLines(o.PasswordList);
-                }
-                else
-                {
-                    passwords = new List<string> { o.PasswordList };
-                }
-
-                //Get user list if it exists
-                if (!string.IsNullOrWhiteSpace(o.UserList))
-                {
-                    //Get from a file if it exists, otherwise assume it's a single user
-                    if (File.Exists(o.UserList))
-                    {
-                        users = File.ReadAllLines(o.UserList);
-                    }
-                    else
-                    {
-                        users = new List<string> { o.UserList };
-                    }
-                }
-                else
-                {
-                    users = null;
-                }
-
-                //Parse the remaining attempts
-                if(o.AttemptsRemaining > 0)
-                {
-                    remainingAttempts = o.AttemptsRemaining;
-                }
-                else
-                {
-                    remainingAttempts = 2;
-                }
-
                 //Try figure out the domain if it isn't provided
                 if (string.IsNullOrWhiteSpace(o.Domain))
                 {
@@ -87,7 +48,88 @@ namespace TheSprayer
                 }
 
                 var adService = new ActiveDirectoryService(o.Domain, o.Username, o.Password, o.DomainController);
-                adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Continuous, o.NoDb, o.Force);
+
+                //Output a list of users to the specified file and exit
+                if (!string.IsNullOrWhiteSpace(o.OutputUsers))
+                {
+                    var users = adService.GetAllDomainUsers().Select(u => u.SamAccountName);
+                    File.WriteAllLines(o.OutputUsers, users);
+                    return;
+                }
+                if (!string.IsNullOrWhiteSpace(o.OutputUsersCsv))
+                {
+                    var users = adService.GetAllDomainUsers();
+                    File.WriteAllText(o.OutputUsers, users.ToCsv());
+                    return;
+                }
+                else if (o.OutputPasswordPolicy) //Output the password policy to the terminal and exit
+                {
+                    var defaultPolicy = adService.GetPasswordPolicy();
+                    var fineGrainedPolicies = adService.GetFineGrainedPasswordPolicy();
+
+                    //Get a list of password policies attached to users that we didn't find, this means it's fine grained policies we can't see because of privs
+                    var unknownPolicies = adService.GetAllDomainUsers().Select(u => u.PasswordPolicyName)
+                        .Where(p => p != "Default Password Policy" && !fineGrainedPolicies.Any(fp => fp.Name == p));
+
+                    ConsoleHelpers.PrintPasswordPolicy(defaultPolicy);
+                    Console.WriteLine();
+                    foreach (var fineGrainedPolicy in fineGrainedPolicies)
+                    {
+                        ConsoleHelpers.PrintPasswordPolicy(defaultPolicy);
+                        Console.WriteLine();
+                    }
+
+                    foreach(var policy in unknownPolicies)
+                    {
+                        ColorConsole.WriteLine($"Found fine-grained password policy but this user can't read it: {policy}", ConsoleColor.Red);
+                    }
+                    return;
+                }
+                else //Otherwise we want to validate remaining parameters and spray
+                {
+                    IEnumerable<string> passwords, users;
+                    int remainingAttempts;
+
+                    //Get password list from file or assume it's a single password if it doesn't exist
+                    if (File.Exists(o.PasswordList))
+                    {
+                        passwords = File.ReadAllLines(o.PasswordList);
+                    }
+                    else
+                    {
+                        passwords = new List<string> { o.PasswordList };
+                    }
+
+                    //Get user list if it exists
+                    if (!string.IsNullOrWhiteSpace(o.UserList))
+                    {
+                        //Get from a file if it exists, otherwise assume it's a single user
+                        if (File.Exists(o.UserList))
+                        {
+                            users = File.ReadAllLines(o.UserList);
+                        }
+                        else
+                        {
+                            users = new List<string> { o.UserList };
+                        }
+                    }
+                    else
+                    {
+                        users = null;
+                    }
+
+                    //Parse the remaining attempts
+                    if (o.AttemptsRemaining > 0)
+                    {
+                        remainingAttempts = o.AttemptsRemaining;
+                    }
+                    else
+                    {
+                        remainingAttempts = 2;
+                    }
+
+                    adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Continuous, o.NoDb, o.Force);
+                }
             });
         }
     }
