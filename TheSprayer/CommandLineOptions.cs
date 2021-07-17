@@ -19,7 +19,7 @@ namespace TheSprayer
         [Option('u', "UserList", Required = false, HelpText = "A file containing a line delimited list of usernames or a single user to try")]
         public string UserList { get; set; }
 
-        [Option('p', "PasswordList", Required = true, HelpText = "A file containing a line delimited list of passwords or a single password to try")]
+        [Option('p', "PasswordList", Required = false, HelpText = "A file containing a line delimited list of passwords or a single password to try")]
         public string PasswordList { get; set; }
 
         [Option('o', "OutFile", Required = false, HelpText = "File to output found credentials")]
@@ -34,13 +34,13 @@ namespace TheSprayer
         [Option('n', "NoDb", Required = false, HelpText = "Disable using a DB to store previously sprayed creds.")]
         public bool NoDb { get; set; }
 
-        [Option("Users", Required = false, HelpText = "Outputs a list of all users")]
+        [Option("Users", Required = false, HelpText = "Outputs a list of all users to the specified file")]
         public string OutputUsers { get; set; }
 
-        [Option("UsersCsv", Required = false, HelpText = "Outputs a list of all users along with their domain info to a CSV file")]
+        [Option("UsersCsv", Required = false, HelpText = "Outputs a list of all users along with their domain info to the specified CSV file")]
         public string OutputUsersCsv { get; set; }
 
-        [Option("PassPol", Required = false, HelpText = "Outputs the password polic(ies) to the terminal")]
+        [Option("Policy", Required = false, HelpText = "Outputs the password policy(ies) to the terminal")]
         public bool OutputPasswordPolicy { get; set; }
 
         [Option('f', "Force", Required = false, HelpText = "Force authentication attempts, even users close to lockout")]

@@ -56,6 +56,9 @@ TheSprayer.exe -p Passwords.txt -f
 -a, --AttemptsRemaining    Amount of attempts to leave per-account before lockout (Default: 2)
 -c, --Continuous           Continuously spray credentials, waiting between attempts to prevent lockout.
 -n, --NoDb                 Disable using a DB to store previously sprayed creds.
+--Users                    Outputs a list of all users to the specified file
+--UsersCsv                 Outputs a list of all users along with their domain info to the specified CSV file
+--Policy                   Outputs the password policy(ies) to the terminal
 -f, --Force                Force authentication attempts, even users close to lockout
 --help                     Display this help screen.
 ```

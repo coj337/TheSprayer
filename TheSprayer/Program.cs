@@ -53,13 +53,15 @@ namespace TheSprayer
                 if (!string.IsNullOrWhiteSpace(o.OutputUsers))
                 {
                     var users = adService.GetAllDomainUsers().Select(u => u.SamAccountName);
-                    File.WriteAllLines(o.OutputUsers, users);
+                    File.WriteAllLines(o.OutputUsers + ".txt", users);
+                    Console.WriteLine($"{o.OutputUsers + ".txt"} created.");
                     return;
                 }
                 if (!string.IsNullOrWhiteSpace(o.OutputUsersCsv))
                 {
                     var users = adService.GetAllDomainUsers();
-                    File.WriteAllText(o.OutputUsers, users.ToCsv());
+                    File.WriteAllText(o.OutputUsersCsv + ".csv", users.ToCsv());
+                    Console.WriteLine($"{o.OutputUsersCsv + ".csv"} created.");
                     return;
                 }
                 else if (o.OutputPasswordPolicy) //Output the password policy to the terminal and exit
@@ -75,7 +77,7 @@ namespace TheSprayer
                     Console.WriteLine();
                     foreach (var fineGrainedPolicy in fineGrainedPolicies)
                     {
-                        ConsoleHelpers.PrintPasswordPolicy(defaultPolicy);
+                        ConsoleHelpers.PrintPasswordPolicy(fineGrainedPolicy);
                         Console.WriteLine();
                     }
 
