@@ -2,7 +2,9 @@
 ![GitHub all releases](https://img.shields.io/github/downloads/coj337/TheSprayer/total)
 
 # TheSprayer
-TheSprayer is a cross-platform tool designed to help penetration testers spray passwords against an Active Directory domain WITHOUT locking out accounts.  
+TheSprayer is a cross-platform tool designed to help penetration testers spray passwords against an Active Directory domain _without_ locking out accounts.  
+
+Several helpful features are enabled by default such as user auto-discovery, current user discovery and a local sqlite db to track sprayed passwords.
 
 ## Quick Start
 To run it, you will need to update the parameters.
