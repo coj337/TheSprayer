@@ -13,6 +13,16 @@ namespace TheSprayer
     {
         public static void Main(string[] args)
         {
+            // Transform long form args to lowercase
+            for(var i = 0; i < args.Length; i++)
+            {
+                // Only transform long form args
+                if (args[i].Length > 2 && args[i][0] != '-' && args[i][1] == '-')
+                {
+                    args[i] = args[i].ToLower();
+                }
+            }
+
             Parser.Default.ParseArguments<CommandLineOptions>(args).WithParsed(o =>
             {
                 //Try figure out the domain if it isn't provided
