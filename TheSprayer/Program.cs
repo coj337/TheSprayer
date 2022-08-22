@@ -56,26 +56,26 @@ namespace TheSprayer
                         return;
                     }
                 }
-
                 var adService = new ActiveDirectoryService(o.Domain, o.Username, o.Password, o.DomainController);
 
                 //Output a list of users to the specified file and exit
-                if (!string.IsNullOrWhiteSpace(o.OutputUsers))
+                if (o.OutputUsers)
                 {
                     var users = adService.GetAllDomainUsers().Select(u => u.SamAccountName);
-                    File.WriteAllLines(o.OutputUsers + ".txt", users);
-                    Console.WriteLine($"{o.OutputUsers + ".txt"} created.");
+                    File.WriteAllLines("AdUserList.txt", users);
+                    Console.WriteLine("AdUserList.txt created.");
                     return;
                 }
-                if (!string.IsNullOrWhiteSpace(o.OutputUsersCsv))
+                if (o.OutputUsersCsv)
                 {
                     var users = adService.GetAllDomainUsers();
-                    File.WriteAllText(o.OutputUsersCsv + ".csv", users.ToCsv());
-                    Console.WriteLine($"{o.OutputUsersCsv + ".csv"} created.");
+                    File.WriteAllText("AdUserDetails.csv", users.ToCsv());
+                    Console.WriteLine("AdUserDetails.csv created.");
                     return;
                 }
                 else if (o.OutputPasswordPolicy) //Output the password policy to the terminal and exit
                 {
+                    Console.WriteLine(5);
                     var defaultPolicy = adService.GetPasswordPolicy();
                     var fineGrainedPolicies = adService.GetFineGrainedPasswordPolicy();
 
@@ -99,6 +99,7 @@ namespace TheSprayer
                 }
                 else //Otherwise we want to validate remaining parameters and spray
                 {
+                    Console.WriteLine(6);
                     IEnumerable<string> passwords, users;
                     int remainingAttempts;
 

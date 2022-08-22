@@ -51,14 +51,14 @@ TheSprayer.exe -p Passwords.txt -f
 TheSprayer.exe --Policy
 ```
 
-##### Write a list of users to users.txt
+##### Output a list of users to AdUserList.txt
 ```
-TheSprayer.exe --Users users
+TheSprayer.exe --Users
 ```
 
-##### Write a list of users and all their details from AD to users.csv
+##### Write a list of users and all their details from AD to AdUserDetails.csv
 ```
-TheSprayer.exe --UsersCsv users
+TheSprayer.exe --UsersCsv
 ```
 
 ## Options

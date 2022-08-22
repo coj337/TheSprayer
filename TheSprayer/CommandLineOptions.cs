@@ -34,11 +34,11 @@ namespace TheSprayer
         [Option('n', "nodb", Required = false, HelpText = "Disable using a DB to store previously sprayed creds.")]
         public bool NoDb { get; set; }
 
-        [Option("users", Required = false, HelpText = "Outputs a list of all users to the specified file")]
-        public string OutputUsers { get; set; }
+        [Option("users", Required = false, Default = null, HelpText = "Outputs a simple list of all users to the txt file")]
+        public bool OutputUsers { get; set; }
 
-        [Option("userscsv", Required = false, HelpText = "Outputs a list of all users along with their domain info to the specified CSV file")]
-        public string OutputUsersCsv { get; set; }
+        [Option("userscsv", Required = false, Default = null, HelpText = "Outputs a list of all users along with their domain info to a CSV file")]
+        public bool OutputUsersCsv { get; set; }
 
         [Option("policy", Required = false, HelpText = "Outputs the password policy(ies) to the terminal")]
         public bool OutputPasswordPolicy { get; set; }
