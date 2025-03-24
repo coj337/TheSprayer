@@ -75,7 +75,6 @@ namespace TheSprayer
                 }
                 else if (o.OutputPasswordPolicy) //Output the password policy to the terminal and exit
                 {
-                    Console.WriteLine(5);
                     var defaultPolicy = adService.GetPasswordPolicy();
                     var fineGrainedPolicies = adService.GetFineGrainedPasswordPolicy();
 
@@ -99,7 +98,6 @@ namespace TheSprayer
                 }
                 else //Otherwise we want to validate remaining parameters and spray
                 {
-                    Console.WriteLine(6);
                     IEnumerable<string> passwords, users;
                     int remainingAttempts;
 
@@ -110,7 +108,7 @@ namespace TheSprayer
                     }
                     else
                     {
-                        passwords = new List<string> { o.PasswordList };
+                        passwords = [o.PasswordList];
                     }
 
                     //Get user list if it exists

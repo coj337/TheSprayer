@@ -62,5 +62,11 @@ namespace TheSprayer.Services
         {
             return _db.Attempts.Where(a => a.Password == password);
         }
+
+        public void BulkSaveCredentialPairs(IEnumerable<CredentialAttempt> attempts)
+        {
+            _db.Attempts.AddRange(attempts);
+            _db.SaveChanges();
+        }
     }
 }
