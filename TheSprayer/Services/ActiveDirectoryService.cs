@@ -23,7 +23,6 @@ namespace TheSprayer.Services
         private readonly string _domainUserPass;
         private readonly string _domainController;
         private readonly string _distinguishedName;
-        private readonly string _dbLock = "";
 
         public ActiveDirectoryService(string domain, string domainUser, string domainUserPass, string domainController)
         {
@@ -55,7 +54,7 @@ namespace TheSprayer.Services
             var policies = new List<PasswordPolicy>();
             string filter = "(objectClass=msDS-PasswordSettings)";
 
-            var connection = CreateLdapConnection();
+            using var connection = CreateLdapConnection();
             var searchRequest = new SearchRequest(_distinguishedName, filter, SearchScope.Subtree);
 
             try
@@ -103,7 +102,7 @@ namespace TheSprayer.Services
         {
             string filter = "(&(objectClass=domainDNS))";
 
-            var connection = CreateLdapConnection();            
+            using var connection = CreateLdapConnection();            
             var searchRequest = new SearchRequest(_distinguishedName, filter, SearchScope.Subtree);
 
             try
@@ -174,7 +173,7 @@ namespace TheSprayer.Services
             }
 
             // Initiate a new LDAP connection.
-            var connection = CreateLdapConnection();
+            using var connection = CreateLdapConnection();
             SearchRequest searchRequest = new(_distinguishedName,
                                       filter,
                                       SearchScope.Subtree,
@@ -469,7 +468,7 @@ namespace TheSprayer.Services
 
         public bool TryValidateCredentials(string username, string password)
         {
-            LdapConnection connection = new(new LdapDirectoryIdentifier(_domainController, 389, false, false));
+            using var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
             connection.Credential = new NetworkCredential(username, password);
 
             try
