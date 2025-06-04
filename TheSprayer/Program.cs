@@ -98,6 +98,12 @@ namespace TheSprayer
                 }
                 else //Otherwise we want to validate remaining parameters and spray
                 {
+                    if (string.IsNullOrWhiteSpace(o.PasswordList))
+                    {
+                        ColorConsole.WriteLine("A password list must be provided with -p when spraying.", ConsoleColor.Red);
+                        return;
+                    }
+
                     IEnumerable<string> passwords, users;
                     int remainingAttempts;
 

