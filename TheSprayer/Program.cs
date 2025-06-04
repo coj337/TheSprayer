@@ -105,7 +105,7 @@ namespace TheSprayer
                     }
 
                     IEnumerable<string> passwords, users;
-                    int remainingAttempts;
+                    int attemptsToLeave;
 
                     //Get password list from file or assume it's a single password if it doesn't exist
                     if (File.Exists(o.PasswordList))
@@ -135,17 +135,17 @@ namespace TheSprayer
                         users = null;
                     }
 
-                    //Parse the remaining attempts
+                    // Parse the desired lockout buffer
                     if (o.AttemptsRemaining > 0)
                     {
-                        remainingAttempts = o.AttemptsRemaining;
+                        attemptsToLeave = o.AttemptsRemaining;
                     }
                     else
                     {
-                        remainingAttempts = 2;
+                        attemptsToLeave = 2;
                     }
 
-                    adService.SprayPasswords(passwords, users, remainingAttempts, o.OutFile, o.Continuous, o.NoDb, o.Force);
+                    adService.SprayPasswords(passwords, users, attemptsToLeave, o.OutFile, o.Continuous, o.NoDb, o.Force);
                 }
             });
         }

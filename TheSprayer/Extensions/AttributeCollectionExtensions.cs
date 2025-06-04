@@ -26,7 +26,7 @@ namespace TheSprayer.Extensions
                         var fileTime = Convert.ToInt64(timeString);
                         if (!fileTime.Equals(long.MaxValue))
                         {
-                            parsedDate = DateTime.FromFileTime(fileTime);
+                            parsedDate = DateTime.FromFileTimeUtc(fileTime);
                         }
                     }
                     else
@@ -40,6 +40,13 @@ namespace TheSprayer.Extensions
                 var t = typeof(T);
                 t = Nullable.GetUnderlyingType(t) ?? t; //Magic to prevent DateTime? throwing an exception when returning DateTime
                 return (parsedDate == null) ? default : (T)Convert.ChangeType(parsedDate, t);
+            }
+
+            //Handle nullable value types
+            var underlying = Nullable.GetUnderlyingType(typeof(T));
+            if (underlying != null)
+            {
+                return attributes.Contains(attributeName) ? (T)Convert.ChangeType(attributes[attributeName][0], underlying) : default;
             }
 
             //Anything else returns default if it doesn't exist

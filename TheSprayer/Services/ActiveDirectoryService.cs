@@ -210,6 +210,15 @@ namespace TheSprayer.Services
                             ? new SecurityIdentifier((byte[])entry.Attributes["objectSid"][0], 0).Value
                             : null;
 
+                        var badPwdCount = entry.Attributes.GetIfExists<int?>("badPwdCount");
+                        var lastBadPwdTime = entry.Attributes.GetIfExists<DateTime?>("badPasswordTime");
+                        if (badPwdCount == null || lastBadPwdTime == null)
+                        {
+                            var sam = entry.Attributes.GetIfExists("sAMAccountName");
+                            ColorConsole.WriteLine($"Warning: Unable to read bad password data for {sam}. Skipping user.", ConsoleColor.Yellow);
+                            continue;
+                        }
+
                         adUsers.Add(new ActiveDirectoryUser()
                         {
                             UserPrincipalName = entry.Attributes.GetIfExists("userPrincipalName"),
@@ -219,8 +228,8 @@ namespace TheSprayer.Services
                             Surname = entry.Attributes.GetIfExists("sn"),
                             Description = entry.Attributes.GetIfExists("description"),
                             LastLogin = entry.Attributes.GetIfExists<DateTime?>("lastLogon"),
-                            BadPasswordAttempts = entry.Attributes.GetIfExists<int>("badPwdCount"),
-                            LastBadPasswordTime = entry.Attributes.GetIfExists<DateTime?>("badPasswordTime"),
+                            BadPasswordAttempts = badPwdCount,
+                            LastBadPasswordTime = lastBadPwdTime,
                             LogonCount = entry.Attributes.GetIfExists<int>("logonCount"),
                             PasswordLastSet = entry.Attributes.GetIfExists<DateTime?>("pwdLastSet"),
                             AccountExpiry = entry.Attributes.GetIfExists<DateTime?>("accountExpires"),
@@ -249,6 +258,16 @@ namespace TheSprayer.Services
             return !Convert.ToBoolean(userAccountControlValue & 0x0002);
         }
 
+        /// <summary>
+        /// Spray a list of passwords against a set of users while keeping a buffer before lockout.
+        /// </summary>
+        /// <param name="passwords">Passwords to try.</param>
+        /// <param name="usersToSpray">Specific users to target or <c>null</c> for all.</param>
+        /// <param name="attemptsToLeave">Number of failed attempts to leave before lockout.</param>
+        /// <param name="outputFile">Optional file to write valid credentials to.</param>
+        /// <param name="continuous">Continue spraying after exhausting users.</param>
+        /// <param name="noDb">Disable local database tracking.</param>
+        /// <param name="force">Ignore safety checks and spray all users.</param>
         public async void SprayPasswords(
     IEnumerable<string> passwords,
     IEnumerable<string> usersToSpray = null,
@@ -342,7 +361,7 @@ namespace TheSprayer.Services
 
                                 foreach (var user in group)
                                 {
-                                    if (user.LastBadPasswordTime < DateTime.Now.AddMinutes(-policy.ObservationWindow))
+                                    if (user.LastBadPasswordTime < DateTime.UtcNow.AddMinutes(-policy.ObservationWindow))
                                     {
                                         user.BadPasswordAttempts = 0;
                                     }
@@ -387,8 +406,8 @@ namespace TheSprayer.Services
                             else
                             {
                                 unsavedAttempts.Add(new CredentialAttempt(user.SamAccountName, password, false));
-                                user.BadPasswordAttempts++;
-                                user.LastBadPasswordTime = DateTime.Now;
+                                user.BadPasswordAttempts = (user.BadPasswordAttempts ?? 0) + 1;
+                                user.LastBadPasswordTime = DateTime.UtcNow;
 
                                 if (!ShouldSprayUser(user, defaultPasswordPolicy, fineGrainedPasswordPolicies, attemptsToLeave))
                                 {
@@ -437,7 +456,13 @@ namespace TheSprayer.Services
             }
         }
 
-
+        /// <summary>
+        /// Determine if a user should be included in the spray based on lockout thresholds.
+        /// </summary>
+        /// <param name="user">User being evaluated.</param>
+        /// <param name="defaultPasswordPolicy">The domain's default password policy.</param>
+        /// <param name="fineGrainedPasswordPolicies">Any fine-grained password policies.</param>
+        /// <param name="attemptsToLeave">Number of attempts to keep before lockout.</param>
         public static bool ShouldSprayUser(ActiveDirectoryUser user, PasswordPolicy defaultPasswordPolicy, List<PasswordPolicy> fineGrainedPasswordPolicies, int attemptsToLeave = 2)
         {
             var policyName = user.PasswordPolicyName;
@@ -456,6 +481,12 @@ namespace TheSprayer.Services
                 return false;
             }
 
+            if (user.BadPasswordAttempts == null || user.LastBadPasswordTime == null)
+            {
+                ColorConsole.WriteLine($"Warning: Insufficient permissions to read lockout details for {user.SamAccountName}. Skipping user.", ConsoleColor.Yellow);
+                return false;
+            }
+
             if (policy == null) // Fine grained policy that we can't see :(
             {
                 // Fine grained password policy detected but not readable, skipping user.
@@ -468,13 +499,13 @@ namespace TheSprayer.Services
             }
             else
             {
-                var remainingAttempts = policy.LockoutThreshold - user.BadPasswordAttempts;
-                if (remainingAttempts >= attemptsToLeave)
+                var remainingAttempts = policy.LockoutThreshold - user.BadPasswordAttempts.Value;
+                if (remainingAttempts > attemptsToLeave)
                 {
                     // Spraying {user.SamAccountName}. Attempts before lockout: {remainingAttempts}
                     return true;
                 }
-                else if (user.LastBadPasswordTime < DateTime.Now.AddMinutes(-1 * policy.ObservationWindow))
+                else if (user.LastBadPasswordTime < DateTime.UtcNow.AddMinutes(-1 * policy.ObservationWindow))
                 {
                     // User hasn't had an incorrect password in at least the observation window, we can try again
                     return true;
