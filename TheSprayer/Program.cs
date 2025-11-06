@@ -145,7 +145,7 @@ namespace TheSprayer
                         attemptsToLeave = 2;
                     }
 
-                    adService.SprayPasswords(passwords, users, attemptsToLeave, o.OutFile, o.Continuous, o.NoDb, o.Force);
+                    adService.SprayPasswords(passwords, users, attemptsToLeave, o.OutFile, o.Continuous, o.NoDb, o.Force, o.RetryOnSuccess);
                 }
             });
         }

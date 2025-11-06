@@ -76,6 +76,7 @@ TheSprayer.exe --UsersCsv
 --Users                    Outputs a list of all users to the specified file
 --UsersCsv                 Outputs a list of all users along with their domain info to the specified CSV file
 --Policy                   Outputs the password policy(ies) to the terminal
+--retryonsuccess           Spray accounts which have previously recorded valid passwords
 -f, --Force                Force authentication attempts, even users close to lockout
 --help                     Display this help screen.
 ```

@@ -268,6 +268,7 @@ namespace TheSprayer.Services
         /// <param name="continuous">Continue spraying after exhausting users.</param>
         /// <param name="noDb">Disable local database tracking.</param>
         /// <param name="force">Ignore safety checks and spray all users.</param>
+        /// <param name="retryOnSuccess">Continue spraying a user even after successful authentication.</param>
         public async void SprayPasswords(
     IEnumerable<string> passwords,
     IEnumerable<string> usersToSpray = null,
@@ -275,7 +276,8 @@ namespace TheSprayer.Services
     string outputFile = null,
     bool continuous = false,
     bool noDb = false,
-    bool force = false
+    bool force = false,
+    bool retryOnSuccess = false
 )
         {
             var defaultPasswordPolicy = GetPasswordPolicy();
@@ -310,10 +312,34 @@ namespace TheSprayer.Services
                 }
             }
 
-            Dictionary<string, List<CredentialAttempt>> previousSprays = new();
+            ConcurrentDictionary<string, ConcurrentBag<CredentialAttempt>> previousSprays;
             if (!noDb)
             {
-                previousSprays = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
+                var existingAttempts = _sqlService.GetSprayAttemptsForUsers(filteredUsers.Select(u => u.SamAccountName));
+                previousSprays = new ConcurrentDictionary<string, ConcurrentBag<CredentialAttempt>>(
+                    existingAttempts.Select(kvp => new KeyValuePair<string, ConcurrentBag<CredentialAttempt>>(kvp.Key, [.. kvp.Value])),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                previousSprays = new ConcurrentDictionary<string, ConcurrentBag<CredentialAttempt>>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var successfulUsers = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+
+            if (!retryOnSuccess && previousSprays.Any())
+            {
+                filteredUsers = filteredUsers
+                    .Where(u => !previousSprays.TryGetValue(u.SamAccountName, out var attempts) || attempts.All(a => !a.Success))
+                    .ToList();
+
+                foreach (var kvp in previousSprays)
+                {
+                    if (kvp.Value.Any(a => a.Success))
+                    {
+                        successfulUsers.TryAdd(kvp.Key, 0);
+                    }
+                }
             }
 
             var unsavedAttempts = new ConcurrentBag<CredentialAttempt>();
@@ -335,7 +361,14 @@ namespace TheSprayer.Services
                 {
                     if (!filteredUsers.Any())
                     {
-                        Console.Write($"{users.Count} users found but they are all at risk of lockout, ");
+                        var allKnownSuccess = !retryOnSuccess && successfulUsers.Any() && users.Where(u => !u.Disabled).All(u => successfulUsers.ContainsKey(u.SamAccountName));
+                        if (allKnownSuccess)
+                        {
+                            Console.WriteLine("All users already have valid credentials recorded, exiting.");
+                            break;
+                        }
+
+                        Console.Write($"{users.Count} users found but they are all at risk of lockout or already have valid credentials, ");
                         if (!continuous)
                         {
                             Console.WriteLine("exiting.");
@@ -361,6 +394,10 @@ namespace TheSprayer.Services
 
                                 foreach (var user in group)
                                 {
+                                    if (!retryOnSuccess && successfulUsers.ContainsKey(user.SamAccountName))
+                                    {
+                                        continue;
+                                    }
                                     if (user.LastBadPasswordTime < DateTime.UtcNow.AddMinutes(-policy.ObservationWindow))
                                     {
                                         user.BadPasswordAttempts = 0;
@@ -384,9 +421,9 @@ namespace TheSprayer.Services
                         new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
                         user =>
                         {
-                            if (!noDb && previousSprays.ContainsKey(user.SamAccountName))
+                            if (!noDb && previousSprays.TryGetValue(user.SamAccountName, out var attemptsForUser))
                             {
-                                var previousAttempt = previousSprays[user.SamAccountName].FirstOrDefault(a => a.Password == password);
+                                var previousAttempt = attemptsForUser.FirstOrDefault(a => a.Password == password);
                                 if (previousAttempt != null)
                                 {
                                     if (previousAttempt.Success)
@@ -401,11 +438,27 @@ namespace TheSprayer.Services
                             {
                                 ColorConsole.WriteLine($"{user.SamAccountName}:{password}");
                                 successfulCredentials.Add((user.SamAccountName, password));
-                                unsavedAttempts.Add(new CredentialAttempt(user.SamAccountName, password, true));
+                                var attempt = new CredentialAttempt(user.SamAccountName, password, true);
+                                unsavedAttempts.Add(attempt);
+                                if (!noDb)
+                                {
+                                    previousSprays.GetOrAdd(user.SamAccountName, _ => new ConcurrentBag<CredentialAttempt>()).Add(attempt);
+                                }
+                                if (!retryOnSuccess)
+                                {
+                                    successfulUsers.TryAdd(user.SamAccountName, 0);
+                                    usersToRemove.Add(user.SamAccountName);
+                                }
                             }
                             else
                             {
-                                unsavedAttempts.Add(new CredentialAttempt(user.SamAccountName, password, false));
+                                var attempt = new CredentialAttempt(user.SamAccountName, password, false);
+                                unsavedAttempts.Add(attempt);
+                                if (!noDb)
+                                {
+                                    previousSprays.GetOrAdd(user.SamAccountName, _ => new ConcurrentBag<CredentialAttempt>()).Add(attempt);
+                                }
+
                                 user.BadPasswordAttempts = (user.BadPasswordAttempts ?? 0) + 1;
                                 user.LastBadPasswordTime = DateTime.UtcNow;
 
@@ -418,6 +471,13 @@ namespace TheSprayer.Services
                     );
 
                     filteredUsers = filteredUsers.Where(u => !usersToRemove.Contains(u.SamAccountName)).ToList();
+
+                    if (!retryOnSuccess && filteredUsers.Any())
+                    {
+                        filteredUsers = filteredUsers
+                            .Where(u => !successfulUsers.ContainsKey(u.SamAccountName))
+                            .ToList();
+                    }
 
                     if (!string.IsNullOrWhiteSpace(outputFile) && successfulCredentials.Count > 0)
                     {

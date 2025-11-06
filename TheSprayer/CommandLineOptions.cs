@@ -45,5 +45,8 @@ namespace TheSprayer
 
         [Option('f', "force", Required = false, HelpText = "Force authentication attempts, even users close to lockout")]
         public bool Force { get; set; }
+
+        [Option('R', "retryonsuccess", Required = false, HelpText = "Continue spraying a user even after finding valid credentials.")]
+        public bool RetryOnSuccess { get; set; }
     }
 }
