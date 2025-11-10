@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Net;
 using System.DirectoryServices.Protocols;
 using TheSprayer.Models;
 using System.Collections.Generic;
@@ -12,6 +11,8 @@ using System.Security.Principal;
 using System.Text;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 
 namespace TheSprayer.Services
 {
@@ -23,6 +24,8 @@ namespace TheSprayer.Services
         private readonly string _domainUserPass;
         private readonly string _domainController;
         private readonly string _distinguishedName;
+        private readonly string _resolvedDomainController;
+        private readonly LdapDirectoryIdentifier _ldapIdentifier;
 
         public ActiveDirectoryService(string domain, string domainUser, string domainUserPass, string domainController)
         {
@@ -30,6 +33,8 @@ namespace TheSprayer.Services
             _domainUser = domainUser;
             _domainUserPass = domainUserPass;
             _domainController = domainController;
+            _resolvedDomainController = ResolveDomainController(domainController);
+            _ldapIdentifier = new LdapDirectoryIdentifier(_resolvedDomainController, 389, false, false);
 
             var splitDomain = _domain.Split('.');
             _distinguishedName = "";
@@ -206,12 +211,25 @@ namespace TheSprayer.Services
                     // Loop through every response entry
                     foreach (SearchResultEntry entry in searchResponse.Entries)
                     {
-                        var sid = entry.Attributes.Contains("objectSid") && entry.Attributes["objectSid"].Count > 0
-                            ? new SecurityIdentifier((byte[])entry.Attributes["objectSid"][0], 0).Value
-                            : null;
+                        string sid = null;
+                        if (entry.Attributes.Contains("objectSid") && entry.Attributes["objectSid"].Count > 0)
+                        {
+                            if (OperatingSystem.IsWindows())
+                            {
+                                sid = new SecurityIdentifier((byte[])entry.Attributes["objectSid"][0], 0).Value;
+                            }
+                        }
 
                         var badPwdCount = entry.Attributes.GetIfExists<int?>("badPwdCount");
                         var lastBadPwdTime = entry.Attributes.GetIfExists<DateTime?>("badPasswordTime");
+
+                        // Sometimes badPasswordTime is just "0" which means never
+                        if(lastBadPwdTime == null)
+                        {
+                            var intEntry = entry.Attributes.GetIfExists<int?>("badPasswordTime");
+                            lastBadPwdTime = intEntry == 0 ? entry.Attributes.GetIfExists<DateTime?>("createTimeStamp") : null;
+                        }
+
                         if (badPwdCount == null || lastBadPwdTime == null)
                         {
                             var sam = entry.Attributes.GetIfExists("sAMAccountName");
@@ -580,7 +598,8 @@ namespace TheSprayer.Services
 
         public bool TryValidateCredentials(string username, string password)
         {
-            using var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
+            using var connection = new LdapConnection(_ldapIdentifier);
+            connection.SessionOptions.ReferralChasing = ReferralChasingOptions.All;
             connection.Credential = new NetworkCredential(username, password, _domain);
 
             try
@@ -596,12 +615,51 @@ namespace TheSprayer.Services
 
         private LdapConnection CreateLdapConnection()
         {
-            var connection = new LdapConnection(new LdapDirectoryIdentifier(_domainController, 389, false, false));
+            var connection = new LdapConnection(_ldapIdentifier);
+            connection.SessionOptions.ReferralChasing = ReferralChasingOptions.All;
             if (!string.IsNullOrWhiteSpace(_domainUser) && !string.IsNullOrWhiteSpace(_domainUserPass))
             {
                 connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
             }
             return connection;
+        }
+
+        private static string ResolveDomainController(string domainController)
+        {
+            if (string.IsNullOrWhiteSpace(domainController))
+            {
+                throw new ArgumentException("Domain controller must be provided", nameof(domainController));
+            }
+
+            if (IPAddress.TryParse(domainController, out _))
+            {
+                return domainController;
+            }
+
+            try
+            {
+                var addresses = Dns.GetHostAddresses(domainController)
+                    .Where(a => a.AddressFamily == AddressFamily.InterNetwork || a.AddressFamily == AddressFamily.InterNetworkV6)
+                    .ToArray();
+
+                if (!addresses.Any())
+                {
+                    ColorConsole.WriteLine($"Warning: Unable to resolve domain controller {domainController}, falling back to original value.", ConsoleColor.Yellow);
+                    return domainController;
+                }
+
+                if (addresses.Length > 1)
+                {
+                    ColorConsole.WriteLine($"Warning: Domain controller {domainController} resolves to multiple addresses; using {addresses[0]} for all operations.", ConsoleColor.Yellow);
+                }
+
+                return addresses[0].ToString();
+            }
+            catch (Exception ex)
+            {
+                ColorConsole.WriteLine($"Warning: Failed to resolve domain controller {domainController}: {ex.Message}. Using supplied value.", ConsoleColor.Yellow);
+                return domainController;
+            }
         }
     }
 }
