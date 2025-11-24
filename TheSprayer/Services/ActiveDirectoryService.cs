@@ -227,10 +227,15 @@ namespace TheSprayer.Services
                         if(lastBadPwdTime == null)
                         {
                             var intEntry = entry.Attributes.GetIfExists<int?>("badPasswordTime");
-                            if (intEntry == 0)
+                            if (intEntry == 0 || intEntry == null)
                             {
                                 lastBadPwdTime = entry.Attributes.GetIfExists<DateTime?>("createTimeStamp") ?? DateTime.MinValue;
                             }
+                        }
+
+                        if (badPwdCount == null)
+                        {
+                            badPwdCount = 0;
                         }
 
                         if (badPwdCount == null || lastBadPwdTime == null)
@@ -369,11 +374,15 @@ namespace TheSprayer.Services
             var cancellationTokenSource = new CancellationTokenSource();
             var saveTask = Task.Run(async () =>
             {
-                while (!cancellationTokenSource.Token.IsCancellationRequested)
+                try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(10));
-                    SaveUnsavedAttempts(unsavedAttempts, noDb);
+                    while (!cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(10), cancellationTokenSource.Token);
+                        SaveUnsavedAttempts(unsavedAttempts, noDb);
+                    }
                 }
+                catch (OperationCanceledException) { }
             }, cancellationTokenSource.Token);
 
             try
@@ -516,7 +525,7 @@ namespace TheSprayer.Services
             finally
             {
                 cancellationTokenSource.Cancel();
-                saveTask.Wait();
+                try { saveTask.Wait(); } catch (AggregateException) { }
                 SaveUnsavedAttempts(unsavedAttempts, noDb);
             }
         }

@@ -2,7 +2,7 @@
   "profiles": {
     "TheSprayer": {
       "commandName": "Project",
-      "commandLineArgs": "-p vagrant -U vagrant -P vagrant -d sevenkingdoms.local -s 192.168.56.10"
+      "commandLineArgs": "-p Heartsbane -U vagrant -P vagrant -d north.sevenkingdoms.local -s 192.168.56.11"
     }
   }
 }
