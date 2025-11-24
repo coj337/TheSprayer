@@ -227,7 +227,10 @@ namespace TheSprayer.Services
                         if(lastBadPwdTime == null)
                         {
                             var intEntry = entry.Attributes.GetIfExists<int?>("badPasswordTime");
-                            lastBadPwdTime = intEntry == 0 ? entry.Attributes.GetIfExists<DateTime?>("createTimeStamp") : null;
+                            if (intEntry == 0)
+                            {
+                                lastBadPwdTime = entry.Attributes.GetIfExists<DateTime?>("createTimeStamp") ?? DateTime.MinValue;
+                            }
                         }
 
                         if (badPwdCount == null || lastBadPwdTime == null)
