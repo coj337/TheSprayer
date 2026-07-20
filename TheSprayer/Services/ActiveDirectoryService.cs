@@ -22,9 +22,8 @@ namespace TheSprayer.Services
         private readonly string _domain;
         private readonly string _domainUser;
         private readonly string _domainUserPass;
-        private readonly string _domainController;
         private readonly string _distinguishedName;
-        private readonly string _resolvedDomainController;
+        private readonly string _ldapHost;
         private readonly LdapDirectoryIdentifier _ldapIdentifier;
 
         public ActiveDirectoryService(string domain, string domainUser, string domainUserPass, string domainController)
@@ -32,9 +31,8 @@ namespace TheSprayer.Services
             _domain = domain;
             _domainUser = domainUser;
             _domainUserPass = domainUserPass;
-            _domainController = domainController;
-            _resolvedDomainController = ResolveDomainController(domainController);
-            _ldapIdentifier = new LdapDirectoryIdentifier(_resolvedDomainController, 389, false, false);
+            _ldapHost = ResolveDomainControllerHost(domainController);
+            _ldapIdentifier = new LdapDirectoryIdentifier(_ldapHost, 389, false, false);
 
             var splitDomain = _domain.Split('.');
             _distinguishedName = "";
@@ -611,8 +609,9 @@ namespace TheSprayer.Services
         public bool TryValidateCredentials(string username, string password)
         {
             using var connection = new LdapConnection(_ldapIdentifier);
+            connection.AuthType = AuthType.Negotiate;
             connection.SessionOptions.ReferralChasing = ReferralChasingOptions.All;
-            connection.Credential = new NetworkCredential(username, password, _domain);
+            connection.Credential = CreateNetworkCredential(username, password);
 
             try
             {
@@ -625,26 +624,88 @@ namespace TheSprayer.Services
             }
         }
 
+        public bool TryBind(out string error)
+        {
+            using var connection = CreateLdapConnection();
+
+            try
+            {
+                connection.Bind();
+                error = null;
+                return true;
+            }
+            catch (LdapException ex)
+            {
+                error = FormatLdapException(ex);
+                return false;
+            }
+        }
+
         private LdapConnection CreateLdapConnection()
         {
             var connection = new LdapConnection(_ldapIdentifier);
+            connection.AuthType = AuthType.Negotiate;
             connection.SessionOptions.ReferralChasing = ReferralChasingOptions.All;
             if (!string.IsNullOrWhiteSpace(_domainUser) && !string.IsNullOrWhiteSpace(_domainUserPass))
             {
-                connection.Credential = new NetworkCredential(_domainUser, _domainUserPass, _domain);
+                connection.Credential = CreateNetworkCredential(_domainUser, _domainUserPass);
             }
             return connection;
         }
 
-        private static string ResolveDomainController(string domainController)
+        private NetworkCredential CreateNetworkCredential(string username, string password)
+        {
+            // UPNs already contain their domain and should not have a second domain appended.
+            if (username.Contains('@'))
+            {
+                return new NetworkCredential(username, password);
+            }
+
+            // Accept DOMAIN\\user as well as the separate domain and username form.
+            var separator = username.IndexOf('\\');
+            if (separator > 0 && separator < username.Length - 1)
+            {
+                return new NetworkCredential(
+                    username[(separator + 1)..],
+                    password,
+                    username[..separator]);
+            }
+
+            return new NetworkCredential(username, password, _domain);
+        }
+
+        private static string FormatLdapException(LdapException exception)
+        {
+            var diagnostic = string.IsNullOrWhiteSpace(exception.ServerErrorMessage)
+                ? null
+                : exception.ServerErrorMessage.Trim();
+
+            return diagnostic == null
+                ? $"{exception.Message} (LDAP error {exception.ErrorCode})"
+                : $"{exception.Message} (LDAP error {exception.ErrorCode}; server diagnostic: {diagnostic})";
+        }
+
+        private static string ResolveDomainControllerHost(string domainController)
         {
             if (string.IsNullOrWhiteSpace(domainController))
             {
                 throw new ArgumentException("Domain controller must be provided", nameof(domainController));
             }
 
-            if (IPAddress.TryParse(domainController, out _))
+            domainController = domainController.Trim().TrimEnd('.');
+
+            if (IPAddress.TryParse(domainController, out var suppliedAddress))
             {
+                var canonicalHost = TryGetCanonicalHostName(suppliedAddress);
+                if (canonicalHost != null)
+                {
+                    return canonicalHost;
+                }
+
+                ColorConsole.WriteLine(
+                    $"Warning: No forward-confirmed DNS name was found for domain controller {domainController}. " +
+                    "Kerberos authentication may fail when LDAP is addressed by IP; supply the DC's FQDN with -s.",
+                    ConsoleColor.Yellow);
                 return domainController;
             }
 
@@ -662,15 +723,37 @@ namespace TheSprayer.Services
 
                 if (addresses.Length > 1)
                 {
-                    ColorConsole.WriteLine($"Warning: Domain controller {domainController} resolves to multiple addresses; using {addresses[0]} for all operations.", ConsoleColor.Yellow);
+                    ColorConsole.WriteLine($"Warning: Domain controller {domainController} resolves to multiple addresses; selecting the DC at {addresses[0]} for all operations.", ConsoleColor.Yellow);
                 }
 
-                return addresses[0].ToString();
+                // Use the selected DC's canonical hostname, rather than its IP, so Negotiate can
+                // request the LDAP service's Kerberos SPN while all operations still hit one DC.
+                return TryGetCanonicalHostName(addresses[0]) ?? domainController;
             }
             catch (Exception ex)
             {
                 ColorConsole.WriteLine($"Warning: Failed to resolve domain controller {domainController}: {ex.Message}. Using supplied value.", ConsoleColor.Yellow);
                 return domainController;
+            }
+        }
+
+        private static string TryGetCanonicalHostName(IPAddress address)
+        {
+            try
+            {
+                var hostName = Dns.GetHostEntry(address).HostName?.TrimEnd('.');
+                if (string.IsNullOrWhiteSpace(hostName) || IPAddress.TryParse(hostName, out _))
+                {
+                    return null;
+                }
+
+                // Forward-confirm the PTR result so an unrelated hostname cannot redirect the bind.
+                var forwardAddresses = Dns.GetHostAddresses(hostName);
+                return forwardAddresses.Any(candidate => candidate.Equals(address)) ? hostName : null;
+            }
+            catch (SocketException)
+            {
+                return null;
             }
         }
     }

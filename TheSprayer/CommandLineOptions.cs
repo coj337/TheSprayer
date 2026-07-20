@@ -22,6 +22,9 @@ namespace TheSprayer
         [Option('p', "passwordlist", Required = false, HelpText = "A file containing a line delimited list of passwords or a single password to try")]
         public string PasswordList { get; set; }
 
+        [Option("empty-password", Required = false, HelpText = "Try an empty password (cannot be combined with -p)")]
+        public bool EmptyPassword { get; set; }
+
         [Option('o', "outfile", Required = false, HelpText = "File to output found credentials")]
         public string OutFile { get; set; }
 

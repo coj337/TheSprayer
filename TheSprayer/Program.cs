@@ -11,8 +11,41 @@ namespace TheSprayer
 {
     public class Program
     {
+        private static string[] PreserveEmptyPasswordArgument(string[] args)
+        {
+            var normalizedArgs = new List<string>(args.Length + 1);
+
+            for (var i = 0; i < args.Length; i++)
+            {
+                normalizedArgs.Add(args[i]);
+
+                var isPasswordOption = args[i] == "-p"
+                    || args[i].Equals("--passwordlist", StringComparison.OrdinalIgnoreCase);
+                var hasNoValue = i == args.Length - 1
+                    || LooksLikeOption(args[i + 1]);
+
+                if (isPasswordOption && hasNoValue)
+                {
+                    normalizedArgs.Add(string.Empty);
+                }
+            }
+
+            return normalizedArgs.ToArray();
+        }
+
+        private static bool LooksLikeOption(string value)
+        {
+            return !string.IsNullOrEmpty(value)
+                && value.Length > 1
+                && value[0] == '-';
+        }
+
         public static void Main(string[] args)
         {
+            // Windows PowerShell 5.1 can remove an explicitly empty native argument. Restore
+            // it when -p has no value before the next option (or is the final argument).
+            args = PreserveEmptyPasswordArgument(args);
+
             // Transform long form args to lowercase
             for(var i = 0; i < args.Length; i++)
             {
@@ -58,6 +91,15 @@ namespace TheSprayer
                 }
                 var adService = new ActiveDirectoryService(o.Domain, o.Username, o.Password, o.DomainController);
 
+                // Bind once up front so authentication failures are reported clearly instead of
+                // being repeated by each policy and user search.
+                if (!adService.TryBind(out var bindError))
+                {
+                    ColorConsole.WriteLine($"Unable to authenticate to LDAP on {o.DomainController}.", ConsoleColor.Red);
+                    ColorConsole.WriteLine(bindError, ConsoleColor.Red);
+                    return;
+                }
+
                 //Output a list of users to the specified file and exit
                 if (o.OutputUsers)
                 {
@@ -80,7 +122,10 @@ namespace TheSprayer
 
                     //Get a list of password policies attached to users that we didn't find, this means it's fine grained policies we can't see because of privs
                     var unknownPolicies = adService.GetAllDomainUsers().Select(u => u.PasswordPolicyName)
-                        .Where(p => p != "Default Password Policy" && !fineGrainedPolicies.Any(fp => fp.Name == p));
+                        .Where(p => !string.IsNullOrWhiteSpace(p)
+                            && p != "Default Password Policy"
+                            && !fineGrainedPolicies.Any(fp => fp.Name == p))
+                        .Distinct(StringComparer.OrdinalIgnoreCase);
 
                     ConsoleHelpers.PrintPasswordPolicy(defaultPolicy);
                     Console.WriteLine();
@@ -98,17 +143,30 @@ namespace TheSprayer
                 }
                 else //Otherwise we want to validate remaining parameters and spray
                 {
-                    if (string.IsNullOrWhiteSpace(o.PasswordList))
+                    if (o.EmptyPassword && o.PasswordList != null)
                     {
-                        ColorConsole.WriteLine("A password list must be provided with -p when spraying.", ConsoleColor.Red);
+                        ColorConsole.WriteLine("Specify either -p or --empty-password, not both.", ConsoleColor.Red);
+                        return;
+                    }
+
+                    // Null means -p was omitted. An explicitly supplied empty string is a valid
+                    // password and must not be treated as a missing option.
+                    if (!o.EmptyPassword && o.PasswordList == null)
+                    {
+                        ColorConsole.WriteLine("A password list must be provided with -p, or use --empty-password.", ConsoleColor.Red);
                         return;
                     }
 
                     IEnumerable<string> passwords, users;
                     int attemptsToLeave;
 
-                    //Get password list from file or assume it's a single password if it doesn't exist
-                    if (File.Exists(o.PasswordList))
+                    // Get the password list from a file, use an explicit empty password, or assume
+                    // the -p value is a single password when it is not an existing file.
+                    if (o.EmptyPassword)
+                    {
+                        passwords = [string.Empty];
+                    }
+                    else if (File.Exists(o.PasswordList))
                     {
                         passwords = File.ReadAllLines(o.PasswordList);
                     }

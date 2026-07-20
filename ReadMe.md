@@ -25,6 +25,11 @@ TheSprayer.exe -u Users.txt
 TheSprayer.exe -u DomainAdmin -p DefinitelyValidPassword
 ``` 
 
+##### Spray a single user with an empty password:
+```
+TheSprayer.exe -u DomainAdmin --empty-password
+```
+
 ##### Spray as another user
 ```
 TheSprayer.exe -U Administrator -P Password1 -p Passwords.txt
@@ -69,6 +74,7 @@ TheSprayer.exe --UsersCsv
 -P, --Password             Required. Password for domain user to enumerate policies
 -u, --UserList             A file containing a line delimited list of usernames or a single user to try
 -p, --PasswordList         Required. A file containing a line delimited list of passwords or a single password to try
+--empty-password           Try an empty password (cannot be combined with -p)
 -o, --OutFile              File to output found credentials
 -a, --AttemptsRemaining    Amount of attempts to leave per-account before lockout (Default: 2)
 -c, --Continuous           Continuously spray credentials, waiting between attempts to prevent lockout.
