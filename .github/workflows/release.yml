@@ -34,7 +34,10 @@ jobs:
         run: |
           release_name="TheSprayer-${{ matrix.target }}"
           # Build everything
-          dotnet publish TheSprayer/TheSprayer.csproj --runtime "${{ matrix.target }}" -p:PublishTrimmed=true -c Release -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true --self-contained true -o "Release-${{ matrix.target }}" 
+          dotnet publish TheSprayer/TheSprayer.csproj --runtime "${{ matrix.target }}" -p:PublishTrimmed=false -c Release -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true --self-contained true -o "Release-${{ matrix.target }}"
+      - name: Smoke test release executable
+        shell: bash
+        run: ./Release-${{ matrix.target }}/TheSprayer${{ matrix.ext }} --help
       - name: Publish
         uses: softprops/action-gh-release@v0.1.5
         with:
